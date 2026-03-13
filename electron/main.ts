@@ -93,9 +93,9 @@ function setupIPC(win: BrowserWindow): void {
     // Merge env-var defaults (stored values win over env)
     return {
       airtable_access_token:
-        stored['airtable_access_token'] ?? process.env['AIRTABLE_ACCESS_TOKEN'] ?? '',
+        stored['airtable_access_token'] ?? '',
       airtable_base_id:
-        stored['airtable_base_id'] ?? process.env['AIRTABLE_BASE_ID'] ?? '',
+        stored['airtable_base_id'] ?? '',
       airtable_table_name:
         stored['airtable_table_name'] ?? 'Tasks',
       link_open_target:
@@ -110,11 +110,17 @@ function setupIPC(win: BrowserWindow): void {
       db.setSetting(key, String(value));
     }
     syncEngine?.reinit();
+    // Trigger an immediate sync so the renderer learns about table state without waiting 30s
+    if (syncEngine) void syncEngine.sync();
   });
 
   // ── Sync ───────────────────────────────────────────────────────────────
   ipcMain.handle('sync:trigger', async () => {
     if (syncEngine) await syncEngine.sync();
+  });
+
+  ipcMain.handle('airtable:createTable', async () => {
+    if (syncEngine) await syncEngine.createTable();
   });
 
   ipcMain.handle('sync:status', () => {

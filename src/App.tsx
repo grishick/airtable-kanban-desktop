@@ -23,13 +23,23 @@ export default function App() {
       .catch(console.error);
   }, []);
 
+  const autoNavigateToSettings = useCallback((state: SyncStatus['state']) => {
+    if (!autoNavigatedRef.current && (state === 'unconfigured' || state === 'table_not_found')) {
+      autoNavigatedRef.current = true;
+      setPage('settings');
+    }
+  }, []);
+
   // Load initial data
   useEffect(() => {
     window.electronAPI.getTasks().then(setTasks).catch(console.error);
-    window.electronAPI.getSyncStatus().then(setSyncStatus).catch(console.error);
+    window.electronAPI.getSyncStatus().then((status) => {
+      setSyncStatus(status);
+      autoNavigateToSettings(status.state);
+    }).catch(console.error);
     window.electronAPI.getTagOptions().then(setTagOptions).catch(console.error);
     loadSettings();
-  }, [loadSettings]);
+  }, [loadSettings, autoNavigateToSettings]);
 
   // Subscribe to push events from main process
   useEffect(() => {
@@ -38,11 +48,15 @@ export default function App() {
       // Re-fetch tag options after sync (sync may have updated them)
       window.electronAPI.getTagOptions().then(setTagOptions).catch(console.error);
     });
-    const unsub2 = window.electronAPI.onSyncStatus(setSyncStatus);
+    const unsub2 = window.electronAPI.onSyncStatus((status) => {
+      setSyncStatus(status);
+      autoNavigateToSettings(status.state);
+    });
     return () => { unsub1(); unsub2(); };
-  }, []);
+  }, [autoNavigateToSettings]);
 
   // Show error dialog when sync fails (but not for transient offline state)
+  const autoNavigatedRef = useRef(false);
   const lastShownErrorRef = useRef<string | null>(null);
   useEffect(() => {
     if (syncStatus.state === 'error' && syncStatus.error) {
@@ -96,6 +110,15 @@ export default function App() {
     setPage('board');
   }, [loadSettings]);
 
+  const handleCreateTable = useCallback(async () => {
+    try {
+      await window.electronAPI.createTable();
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      await window.electronAPI.showError('Failed to Create Table', msg);
+    }
+  }, []);
+
   const syncLabel = syncStatus.state === 'syncing'
     ? 'Syncing…'
     : syncStatus.lastSync
@@ -143,6 +166,14 @@ export default function App() {
         <div className="banner">
           ⚠ Airtable is not configured — showing local cache only.{' '}
           <button onClick={() => setPage('settings')}>Go to Settings</button>
+        </div>
+      )}
+
+      {/* Table not found banner */}
+      {syncStatus.state === 'table_not_found' && page === 'board' && (
+        <div className="banner">
+          ⚠ The configured Airtable table was not found.{' '}
+          <button onClick={handleCreateTable}>Create Tasks Table</button>
         </div>
       )}
 

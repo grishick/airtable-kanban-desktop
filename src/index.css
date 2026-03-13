@@ -520,14 +520,14 @@ a {
   -webkit-line-clamp: 3;
 }
 
-/* ── WYSIWYG editor ───────────────────────────────────────────────────────── */
+/* ── Quill WYSIWYG editor ─────────────────────────────────────────────────── */
+/* Quill Snow CSS is imported by the RichTextEditor component.                 */
+/* These rules override Snow defaults to match the app design.                 */
+
 .wys-editor {
-  display: flex;
-  flex-direction: column;
-  gap: 0;
   border: 2px solid var(--border);
   border-radius: 6px;
-  background: white;
+  overflow: hidden;
   transition: border-color 0.15s;
 }
 
@@ -535,117 +535,51 @@ a {
   border-color: var(--accent);
 }
 
-.wys-toolbar {
-  display: flex;
-  align-items: center;
-  gap: 2px;
-  padding: 5px 8px;
-  border-bottom: 1px solid var(--border);
-  flex-wrap: wrap;
-}
-
-.tb-btn {
+/* Remove Quill's own borders; use our outer border instead */
+.wys-editor .ql-toolbar.ql-snow,
+.wys-editor .ql-container.ql-snow {
   border: none;
-  background: transparent;
-  color: var(--text-secondary);
-  padding: 3px 7px;
-  border-radius: 4px;
-  font-size: 13px;
-  cursor: pointer;
-  line-height: 1.4;
-  transition: background 0.12s, color 0.12s;
 }
 
-.tb-btn:hover {
-  background: var(--column-bg);
-  color: var(--text);
+.wys-editor .ql-toolbar.ql-snow {
+  border-bottom: 1px solid var(--border);
+  padding: 5px 8px;
+  font-family: inherit;
 }
 
-.tb-bold   { font-weight: 700; }
-.tb-italic { font-style: italic; }
-.tb-strike { text-decoration: line-through; }
-.tb-code   { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 12px; }
-
-.tb-sep {
-  width: 1px;
-  height: 16px;
-  background: var(--border);
-  margin: 0 4px;
-  flex-shrink: 0;
+.wys-editor .ql-container.ql-snow {
+  font-size: 14px;
+  font-family: inherit;
 }
 
-.wys-content {
+.wys-editor .ql-editor {
   min-height: 160px;
   max-height: 340px;
   overflow-y: auto;
   padding: 10px 12px;
-  font-size: 14px;
-  line-height: 1.5;
-  outline: none;
   color: var(--text);
-  word-break: break-word;
+  line-height: 1.5;
 }
 
 /* Placeholder */
-.wys-content[data-empty="true"]::before {
-  content: attr(data-placeholder);
+.wys-editor .ql-editor.ql-blank::before {
   color: var(--text-muted);
-  pointer-events: none;
+  font-style: normal;
 }
 
-/* Block spacing inside editor */
-.wys-content p,
-.wys-content ul,
-.wys-content ol {
-  margin: 0 0 0.5em;
-}
-.wys-content p:last-child,
-.wys-content ul:last-child,
-.wys-content ol:last-child {
-  margin-bottom: 0;
-}
-.wys-content ul,
-.wys-content ol {
-  padding-left: 1.4em;
-}
-.wys-content strong, .wys-content b { font-weight: 700; }
-.wys-content em, .wys-content i     { font-style: italic; }
-.wys-content del, .wys-content s    { text-decoration: line-through; color: var(--text-secondary); }
-.wys-content code {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-size: 0.88em;
-  background: rgba(9, 30, 66, 0.06);
-  border-radius: 3px;
-  padding: 0.1em 0.35em;
-}
-.wys-content a {
+/* Links */
+.wys-editor .ql-editor a {
   color: var(--accent);
-  text-decoration: underline;
   cursor: pointer;
 }
 
-/* Checklist inside editor */
-.wys-content ul.wys-checklist {
-  list-style: none;
-  padding-left: 0;
-}
-.wys-content ul.wys-checklist li {
-  display: flex;
-  align-items: baseline;
-  gap: 6px;
-}
-.wys-content ul.wys-checklist li[data-checked="true"] {
+/* Checked list item — strikethrough + muted color */
+.wys-editor .ql-editor li[data-list="checked"] {
   color: var(--text-muted);
   text-decoration: line-through;
 }
-.wys-cb {
-  cursor: pointer;
-  user-select: none;
-  flex-shrink: 0;
-  font-size: 14px;
-}
-.wys-cb:hover {
-  opacity: 0.7;
+.wys-editor .ql-editor li[data-list="checked"] > .ql-ui {
+  text-decoration: none;
 }
 
 .task-description-rich {

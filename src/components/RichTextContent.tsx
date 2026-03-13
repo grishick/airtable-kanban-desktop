@@ -118,11 +118,11 @@ function parseBlocks(input: string): Block[] {
         type: 'checkbox-list',
         items: blockLines.map((line, offset) => {
           const trimmed = line.trim();
-          const match = trimmed.match(/^(?:[-*+]\s+)?\[( |x|X)\]\s+(.*)$/);
+          const match = trimmed.match(/^(?:[-*+]\s+)?\[( |x|X)\](?:\s+(.*))?$/);
           return {
             lineIndex: start + offset,
             checked: !!match && /x/i.test(match[1]),
-            text: match?.[2] ?? trimmed,
+            text: match?.[2] ?? '',
           };
         }),
       });
@@ -145,7 +145,7 @@ function parseBlocks(input: string): Block[] {
 }
 
 function isCheckboxListBlock(lines: string[]): boolean {
-  return lines.length > 0 && lines.every((line) => /^(?:[-*+]\s+)?\[( |x|X)\]\s+/.test(line.trim()));
+  return lines.length > 0 && lines.every((line) => /^(?:[-*+]\s+)?\[( |x|X)\](\s|$)/.test(line.trim()));
 }
 
 function isListBlock(lines: string[]): boolean {
@@ -222,6 +222,6 @@ function normalizeText(input: string): string {
 function toggleCheckboxLine(source: string, lineIndex: number, checked: boolean): string {
   const lines = normalizeText(source).split('\n');
   const line = lines[lineIndex] ?? '';
-  lines[lineIndex] = line.replace(/^(\s*(?:[-*+]\s+)?\[)( |x|X)(\]\s+)/, `$1${checked ? 'x' : ' '}$3`);
+  lines[lineIndex] = line.replace(/^(\s*(?:[-*+]\s+)?\[)( |x|X)(\](?:\s+)?)/, `$1${checked ? 'x' : ' '}$3`);
   return lines.join('\n');
 }

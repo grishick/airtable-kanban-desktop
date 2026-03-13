@@ -1,4 +1,7 @@
-import { useEffect, useRef, useCallback } from 'react';
+import { useEffect, useRef } from 'react';
+import Quill, { Delta } from 'quill';
+import type { Op } from 'quill';
+import 'quill/dist/quill.snow.css';
 
 interface Props {
   value: string;
@@ -6,306 +9,241 @@ interface Props {
   onToggleCheckbox?: (nextContent: string) => void | Promise<void>;
 }
 
-// ── Markdown → HTML ────────────────────────────────────────────────────────
-
-function escHtml(s: string): string {
-  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-}
-
+// ── Inline: Markdown text → Delta ops ──────────────────────────────────────
+//
+// Groups:
+//  1,2  **bold**        → { bold: true }
+//  3,4  ~~strike~~      → { strike: true }
+//  5,6  `code`          → { code: true }
+//  7    *italic* inner  → { italic: true }
+//  8    _italic_ inner  → { italic: true }
+//  9,10 [text](url)     → { link: url }
+//  11   <url> inner     → { link: url }
+//  12   bare url        → { link: url }
 const INLINE_RE =
-  /(\[([^\]\n]+)\]\((https?:\/\/[^\s)]+)\))|(<(https?:\/\/[^\s<>]+)>)|(https?:\/\/[^\s<>[\]()]+)|(\*\*([^*\n]+)\*\*)|(~~([^~\n]+)~~)|(`([^`\n]+)`)|(\*([^*\n]+)\*)(?!\*)|(_([^_\n]+)_)/g;
+  /(\*\*([^*\n]+)\*\*)|(~~([^~\n]+)~~)|(`([^`\n]+)`)|\*([^*\n]+)\*(?!\*)|_([^_\n]+)_|\[([^\]\n]+)\]\((https?:\/\/[^\s)]+)\)|<(https?:\/\/[^\s<>]+)>|(https?:\/\/[^\s<>\[\]()]+)/g;
 
-function inlineMdToHtml(text: string): string {
-  let out = '';
+function parseInlineOps(text: string): Op[] {
+  if (!text) return [];
+  const ops: Op[] = [];
   let last = 0;
   INLINE_RE.lastIndex = 0;
   let m: RegExpExecArray | null;
   while ((m = INLINE_RE.exec(text)) !== null) {
-    out += escHtml(text.slice(last, m.index));
-    if (m[1])       out += `<a href="${escHtml(m[3])}">${escHtml(m[2])}</a>`;
-    else if (m[4])  out += `<a href="${escHtml(m[5])}">${escHtml(m[5])}</a>`;
-    else if (m[6])  out += `<a href="${escHtml(m[6])}">${escHtml(m[6])}</a>`;
-    else if (m[7])  out += `<strong>${escHtml(m[8])}</strong>`;
-    else if (m[9])  out += `<del>${escHtml(m[10])}</del>`;
-    else if (m[11]) out += `<code>${escHtml(m[12])}</code>`;
-    else if (m[13]) out += `<em>${escHtml(m[14])}</em>`;
-    else if (m[15]) out += `<em>${escHtml(m[16])}</em>`;
+    if (m.index > last) ops.push({ insert: text.slice(last, m.index) });
+    if      (m[1])  ops.push({ insert: m[2],  attributes: { bold: true } });
+    else if (m[3])  ops.push({ insert: m[4],  attributes: { strike: true } });
+    else if (m[5])  ops.push({ insert: m[6],  attributes: { code: true } });
+    else if (m[7])  ops.push({ insert: m[7],  attributes: { italic: true } });
+    else if (m[8])  ops.push({ insert: m[8],  attributes: { italic: true } });
+    else if (m[9])  ops.push({ insert: m[9],  attributes: { link: m[10] } });
+    else if (m[11]) ops.push({ insert: m[11], attributes: { link: m[11] } });
+    else if (m[12]) ops.push({ insert: m[12], attributes: { link: m[12] } });
     last = INLINE_RE.lastIndex;
   }
-  return out + escHtml(text.slice(last));
+  if (last < text.length) ops.push({ insert: text.slice(last) });
+  return ops;
 }
 
-function mdToHtml(md: string): string {
-  if (!md.trim()) return '';
+// ── Inline: Delta ops → Markdown text ──────────────────────────────────────
+
+function lineDeltaToInline(lineDelta: Delta): string {
+  let out = '';
+  for (const op of lineDelta.ops) {
+    if (typeof op.insert !== 'string') continue;
+    const text = op.insert;
+    const a = op.attributes ?? {};
+    if (a['code']) { out += `\`${text}\``; continue; }
+    let s = text;
+    if (a['link'])   s = `[${s}](${a['link'] as string})`;
+    if (a['strike']) s = `~~${s}~~`;
+    if (a['italic']) s = `*${s}*`;
+    if (a['bold'])   s = `**${s}**`;
+    out += s;
+  }
+  return out;
+}
+
+// ── Markdown → Delta ────────────────────────────────────────────────────────
+
+function markdownToDelta(md: string): Delta {
+  const ops: Op[] = [];
   const lines = md.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n');
-  const html: string[] = [];
-  let i = 0;
-  while (i < lines.length) {
-    while (i < lines.length && !lines[i].trim()) i++;
-    if (i >= lines.length) break;
-    const s = i;
-    while (i < lines.length && lines[i].trim()) i++;
-    const block = lines.slice(s, i);
-    const isCb  = block.every(l => /^(?:[-*+] )?\[[ xX]\] /.test(l.trim()));
-    const isBul = !isCb && block.every(l => /^[-*+] /.test(l.trim()));
-    const isOrd = !isCb && block.every(l => /^\d+[.)]\s/.test(l.trim()));
-    if (isCb) {
-      html.push('<ul class="wys-checklist">');
-      for (const l of block) {
-        const m = l.trim().match(/^(?:[-*+] )?\[([ xX])\] (.*)/);
-        const checked = m ? /x/i.test(m[1]) : false;
-        html.push(
-          `<li data-checked="${checked}">` +
-          `<span class="wys-cb" contenteditable="false">${checked ? '☑' : '☐'}</span>` +
-          `\u00A0${inlineMdToHtml(m?.[2] ?? '')}</li>`,
-        );
-      }
-      html.push('</ul>');
-    } else if (isBul) {
-      html.push('<ul>');
-      for (const l of block) html.push(`<li>${inlineMdToHtml(l.trim().replace(/^[-*+] /, ''))}</li>`);
-      html.push('</ul>');
-    } else if (isOrd) {
-      html.push('<ol>');
-      for (const l of block) html.push(`<li>${inlineMdToHtml(l.trim().replace(/^\d+[.)]\s+/, ''))}</li>`);
-      html.push('</ol>');
-    } else {
-      const content = block.map(l => inlineMdToHtml(l)).join('<br>');
-      html.push(`<p>${content || '<br>'}</p>`);
-    }
-  }
-  return html.join('');
-}
 
-// ── DOM → Markdown ─────────────────────────────────────────────────────────
+  for (const line of lines) {
+    const trimmed = line.trim();
 
-function nodeInlineMd(n: Node): string {
-  if (n.nodeType === Node.TEXT_NODE) return (n.textContent ?? '').replace(/\u00A0/g, ' ');
-  if (n.nodeType !== Node.ELEMENT_NODE) return '';
-  const el = n as HTMLElement;
-  if (el.classList.contains('wys-cb')) return '';
-  const tag = el.tagName.toLowerCase();
-  const inner = Array.from(el.childNodes).map(nodeInlineMd).join('');
-  if (tag === 'strong' || tag === 'b') return `**${inner}**`;
-  if (tag === 'em'     || tag === 'i') return `*${inner}*`;
-  if (tag === 'del'    || tag === 's') return `~~${inner}~~`;
-  if (tag === 'code') return `\`${inner}\``;
-  if (tag === 'a') {
-    const anchor = el as HTMLAnchorElement;
-    // .href gives the fully resolved URL; fall back to raw attribute for relative/unusual URLs
-    const href = anchor.href || anchor.getAttribute('href') || '';
-    // If the visible text is the same as the URL, use angle-bracket autolink form
-    if (inner === href || inner === anchor.getAttribute('href')) return `<${href}>`;
-    return `[${inner}](${href})`;
-  }
-  if (tag === 'br') return '\n';
-  return inner;
-}
-
-function liText(li: HTMLElement): string {
-  return Array.from(li.childNodes)
-    .filter(n => !(n.nodeType === Node.ELEMENT_NODE && (n as HTMLElement).classList.contains('wys-cb')))
-    .map(nodeInlineMd).join('').replace(/^\u00A0/, '').replace(/\u00A0/g, ' ').trim();
-}
-
-function domToMd(root: HTMLElement): string {
-  const parts: string[] = [];
-  const push = (line: string) => {
-    if (line === '' && (parts.length === 0 || parts[parts.length - 1] === '')) return;
-    parts.push(line);
-  };
-
-  for (const child of root.childNodes) {
-    if (child.nodeType === Node.TEXT_NODE) {
-      const t = (child.textContent ?? '').replace(/\u00A0/g, ' ').trim();
-      if (t) push(t);
+    // Checkbox: `[ ] text`, `[x] text`, `- [ ] text`, `- [x] text`
+    const cbMatch = trimmed.match(/^(?:[-*+]\s+)?\[([ xX])\]\s*(.*)$/);
+    if (cbMatch) {
+      ops.push(...parseInlineOps(cbMatch[2]));
+      ops.push({ insert: '\n', attributes: { list: /x/i.test(cbMatch[1]) ? 'checked' : 'unchecked' } });
       continue;
     }
-    if (child.nodeType !== Node.ELEMENT_NODE) continue;
-    const el = child as HTMLElement;
-    const tag = el.tagName.toLowerCase();
 
-    if (tag === 'p' || tag === 'div') {
-      const line = Array.from(el.childNodes).map(nodeInlineMd).join('').trimEnd();
-      if (parts.length > 0 && parts[parts.length - 1] !== '') push('');
-      if (line) push(line);
-    } else if (tag === 'ul' || tag === 'ol') {
-      push('');
-      const isCb = el.classList.contains('wys-checklist');
-      let idx = 1;
-      for (const li of Array.from(el.children) as HTMLElement[]) {
-        const text = liText(li);
-        if (isCb)         push(`[${li.dataset.checked === 'true' ? 'x' : ' '}] ${text}`);
-        else if (tag === 'ol') push(`${idx++}. ${text}`);
-        else              push(`- ${text}`);
-      }
-      push('');
-    } else if (tag === 'br') {
-      push('');
+    // Ordered list: `1. text` or `1) text`
+    const ordMatch = trimmed.match(/^\d+[.)]\s+(.*)$/);
+    if (ordMatch) {
+      ops.push(...parseInlineOps(ordMatch[1]));
+      ops.push({ insert: '\n', attributes: { list: 'ordered' } });
+      continue;
     }
+
+    // Bullet list: `- text`, `* text`, `+ text`
+    const bulMatch = trimmed.match(/^[-*+]\s+(.*)$/);
+    if (bulMatch) {
+      ops.push(...parseInlineOps(bulMatch[1]));
+      ops.push({ insert: '\n', attributes: { list: 'bullet' } });
+      continue;
+    }
+
+    // Normal or empty line
+    if (trimmed) ops.push(...parseInlineOps(trimmed));
+    ops.push({ insert: '\n' });
   }
 
-  while (parts.length && parts[parts.length - 1] === '') parts.pop();
-  return parts.join('\n');
+  return new Delta(ops.length ? ops : [{ insert: '\n' }]);
+}
+
+// ── Delta → Markdown ────────────────────────────────────────────────────────
+
+function deltaToMarkdown(delta: Delta): string {
+  const lines: string[] = [];
+  let ordCounter = 0;
+
+  // eachLine is a quill-delta method: calls predicate per line (split on \n)
+  (delta as Delta & {
+    eachLine(fn: (line: Delta, attrs: Record<string, unknown>) => void): void;
+  }).eachLine((lineDelta, attrs) => {
+    const text = lineDeltaToInline(lineDelta);
+    const list = attrs['list'] as string | undefined;
+
+    if (list === 'ordered') {
+      lines.push(`${++ordCounter}. ${text}`);
+      return;
+    }
+    ordCounter = 0;
+    if      (list === 'bullet')    lines.push(`- ${text}`);
+    else if (list === 'checked')   lines.push(`- [x] ${text}`);
+    else if (list === 'unchecked') lines.push(`- [ ] ${text}`);
+    else                           lines.push(text);
+  });
+
+  return lines.join('\n').trimEnd();
+}
+
+// ── Detect checkbox-only change (for auto-save) ─────────────────────────────
+// A true checkbox toggle: all ops are retains, and at least one op changes
+// the `list` attribute to 'checked' or 'unchecked' (not null / other formats).
+// This excludes Enter-to-exit-list, which emits { list: null }.
+
+function isCheckboxToggle(changeDelta: Delta): boolean {
+  let hasCheckboxChange = false;
+  const allValid = changeDelta.ops.every((op) => {
+    if (op.retain === undefined) return false;          // insert or delete → not a toggle
+    if (!op.attributes) return true;                    // plain retain → ok
+    const keys = Object.keys(op.attributes);
+    if (keys.length !== 1 || !('list' in op.attributes)) return false;
+    const v = op.attributes['list'];
+    if (v !== 'checked' && v !== 'unchecked') return false; // null / 'bullet' etc → not a checkbox toggle
+    hasCheckboxChange = true;
+    return true;
+  });
+  return allValid && hasCheckboxChange;
 }
 
 // ── Component ───────────────────────────────────────────────────────────────
 
 export default function RichTextEditor({ value, onChange, onToggleCheckbox }: Props) {
-  const ref     = useRef<HTMLDivElement>(null);
-  const focused = useRef(false);
+  // wrapperRef  → the outer .wys-editor div (holds border / focus styles)
+  // containerRef → inner div passed to Quill; Quill inserts .ql-toolbar BEFORE
+  //                this element (inside wrapperRef), keeping everything inside
+  //                our styled wrapper.
+  const wrapperRef   = useRef<HTMLDivElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const quillRef     = useRef<Quill | null>(null);
+  // Track the last markdown we emitted so the sync effect doesn't echo it back
+  const lastEmittedRef = useRef(value);
 
-  // Sync prop → DOM only when editor is not focused
+  // Keep callbacks in refs so the Quill event handler always sees fresh values
+  const onChangeRef          = useRef(onChange);
+  const onToggleCheckboxRef  = useRef(onToggleCheckbox);
+  onChangeRef.current         = onChange;
+  onToggleCheckboxRef.current = onToggleCheckbox;
+
+  // Initialize Quill once on mount
   useEffect(() => {
-    if (ref.current && !focused.current) {
-      const html = mdToHtml(value);
-      ref.current.innerHTML = html;
-      ref.current.dataset.empty = String(!html);
+    const container = containerRef.current;
+    if (!container || quillRef.current) return;
+
+    const quill = new Quill(container, {
+      theme: 'snow',
+      modules: {
+        toolbar: [
+          ['bold', 'italic', 'strike', 'code'],
+          [{ list: 'ordered' }, { list: 'bullet' }, { list: 'check' }],
+          ['link', 'clean'],
+        ],
+      },
+      placeholder: 'Optional details…',
+    });
+
+    lastEmittedRef.current = value;
+    quill.setContents(markdownToDelta(lastEmittedRef.current), 'silent' as Parameters<typeof quill.setContents>[1]);
+    quillRef.current = quill;
+
+    const handleTextChange = (changeDelta: Delta, _old: Delta, source: string) => {
+      if (source === 'silent') return;
+      const md = deltaToMarkdown(quill.getContents());
+      lastEmittedRef.current = md;
+      onChangeRef.current(md);
+      if (onToggleCheckboxRef.current && isCheckboxToggle(changeDelta)) {
+        void onToggleCheckboxRef.current(md);
+      }
+    };
+
+    // Intercept link clicks — open via Electron rather than navigating
+    const handleClick = (e: MouseEvent) => {
+      const anchor = (e.target as HTMLElement).closest('a[href]') as HTMLAnchorElement | null;
+      if (anchor) {
+        e.preventDefault();
+        const url = anchor.getAttribute('href') || anchor.href;
+        if (url) void window.electronAPI.openLink(url);
+      }
+    };
+
+    quill.on('text-change', handleTextChange as Parameters<typeof quill.on>[1]);
+    container.addEventListener('click', handleClick);
+
+    return () => {
+      quill.off('text-change', handleTextChange as Parameters<typeof quill.off>[1]);
+      container.removeEventListener('click', handleClick);
+      quillRef.current = null;
+      // Remove Quill-injected toolbar (it sits before containerRef inside wrapperRef)
+      const toolbar = container.previousElementSibling;
+      if (toolbar?.classList.contains('ql-toolbar')) toolbar.remove();
+      container.innerHTML = '';
+      container.className = '';
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // intentionally empty — Quill is initialized once
+
+  // Sync external value → Quill when editor is not focused
+  useEffect(() => {
+    const quill = quillRef.current;
+    if (!quill || quill.hasFocus()) return;
+    // Skip if we ourselves just emitted this value (avoid echo-back loop)
+    if (value === lastEmittedRef.current) return;
+    const current = deltaToMarkdown(quill.getContents());
+    if (current !== value) {
+      lastEmittedRef.current = value;
+      quill.setContents(markdownToDelta(value), 'silent' as Parameters<typeof quill.setContents>[1]);
     }
   }, [value]);
 
-  const serialize = useCallback(() => {
-    if (!ref.current) return;
-    const md = domToMd(ref.current);
-    ref.current.dataset.empty = String(!md.trim());
-    onChange(md);
-  }, [onChange]);
-
-  // ── Toolbar actions ──────────────────────────────────────────────────────
-
-  const exec = (cmd: string, arg?: string) => {
-    ref.current?.focus();
-    document.execCommand(cmd, false, arg);
-    serialize();
-  };
-
-  const insertInlineCode = () => {
-    ref.current?.focus();
-    const sel = window.getSelection();
-    const selected = sel?.toString() || 'code';
-    document.execCommand('insertHTML', false, `<code>${escHtml(selected)}</code>`);
-    serialize();
-  };
-
-  const insertLink = () => {
-    const sel = window.getSelection();
-    const selectedText = sel?.toString() ?? '';
-    // Save range before prompt steals focus
-    const savedRange = sel?.rangeCount ? sel.getRangeAt(0).cloneRange() : null;
-    const url = window.prompt('Enter URL:', 'https://');
-    if (!url) return;
-    ref.current?.focus();
-    if (savedRange) {
-      sel?.removeAllRanges();
-      sel?.addRange(savedRange);
-    }
-    document.execCommand('insertHTML', false,
-      `<a href="${escHtml(url)}">${escHtml(selectedText || url)}</a>`,
-    );
-    serialize();
-  };
-
-  const insertChecklist = () => {
-    ref.current?.focus();
-    document.execCommand(
-      'insertHTML', false,
-      '<ul class="wys-checklist"><li data-checked="false">' +
-      '<span class="wys-cb" contenteditable="false">☐</span>\u00A0</li></ul>',
-    );
-    serialize();
-  };
-
-  // ── Enter inside checklist → new checklist item ──────────────────────────
-
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key !== 'Enter') return;
-    const sel = window.getSelection();
-    if (!sel?.rangeCount) return;
-    const range = sel.getRangeAt(0);
-    const anchor = range.startContainer.nodeType === Node.TEXT_NODE
-      ? range.startContainer.parentElement
-      : (range.startContainer as HTMLElement);
-    const li = anchor?.closest?.('li') as HTMLElement | null;
-    const ul = li?.closest('ul.wys-checklist') as HTMLElement | null;
-    if (!ul || !li) return;
-
-    e.preventDefault();
-    const newLi = document.createElement('li');
-    newLi.dataset.checked = 'false';
-    const cb = document.createElement('span');
-    cb.className = 'wys-cb';
-    cb.contentEditable = 'false';
-    cb.textContent = '☐';
-    const space = document.createTextNode('\u00A0');
-    newLi.appendChild(cb);
-    newLi.appendChild(space);
-    li.after(newLi);
-    const r = document.createRange();
-    r.setStartAfter(space);
-    r.collapse(true);
-    sel.removeAllRanges();
-    sel.addRange(r);
-    serialize();
-  };
-
-  // ── Checkbox toggle ──────────────────────────────────────────────────────
-
-  const handleClick = (e: React.MouseEvent) => {
-    const target = e.target as HTMLElement;
-
-    // Open links via the configured target (browser or in-app window)
-    const anchor = target.closest('a[href]') as HTMLAnchorElement | null;
-    if (anchor) {
-      e.preventDefault();
-      const url = anchor.href || anchor.getAttribute('href') || '';
-      if (url) window.electronAPI.openLink(url);
-      return;
-    }
-
-    if (!target.classList.contains('wys-cb')) return;
-    e.preventDefault();
-    const li = target.closest('li') as HTMLElement | null;
-    if (!li) return;
-    const checked = li.dataset.checked !== 'true';
-    li.dataset.checked = String(checked);
-    target.textContent = checked ? '☑' : '☐';
-    const md = domToMd(ref.current!);
-    ref.current!.dataset.empty = String(!md.trim());
-    onChange(md);
-    onToggleCheckbox?.(md);
-  };
-
-  const prevent = (e: React.MouseEvent) => e.preventDefault();
-
   return (
-    <div className="wys-editor">
-      <div className="wys-toolbar" role="toolbar" aria-label="Formatting">
-        <button type="button" className="tb-btn tb-bold"   onMouseDown={prevent} onClick={() => exec('bold')}   title="Bold (Ctrl+B)"><b>B</b></button>
-        <button type="button" className="tb-btn tb-italic" onMouseDown={prevent} onClick={() => exec('italic')} title="Italic (Ctrl+I)"><i>I</i></button>
-        <button type="button" className="tb-btn tb-strike" onMouseDown={prevent} onClick={() => exec('strikeThrough')} title="Strikethrough"><s>S</s></button>
-        <button type="button" className="tb-btn tb-code"   onMouseDown={prevent} onClick={insertInlineCode}    title="Inline code">{'{ }'}</button>
-        <span className="tb-sep" />
-        <button type="button" className="tb-btn" onMouseDown={prevent} onClick={() => exec('insertUnorderedList')} title="Bullet list">• List</button>
-        <button type="button" className="tb-btn" onMouseDown={prevent} onClick={() => exec('insertOrderedList')}   title="Numbered list">1. List</button>
-        <button type="button" className="tb-btn" onMouseDown={prevent} onClick={insertChecklist}                   title="Checklist">☐ Check</button>
-        <span className="tb-sep" />
-        <button type="button" className="tb-btn" onMouseDown={prevent} onClick={insertLink} title="Insert link">Link</button>
-      </div>
-
-      <div
-        ref={ref}
-        contentEditable
-        suppressContentEditableWarning
-        className="wys-content"
-        onInput={serialize}
-        onFocus={() => { focused.current = true; }}
-        onBlur={() => { focused.current = false; serialize(); }}
-        onClick={handleClick}
-        onKeyDown={handleKeyDown}
-        data-placeholder="Optional details…"
-        data-empty={!value.trim() ? 'true' : 'false'}
-        spellCheck={false}
-      />
+    <div className="wys-editor" ref={wrapperRef}>
+      <div ref={containerRef} />
     </div>
   );
 }

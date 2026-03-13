@@ -131,6 +131,51 @@ export class AirtableClient {
     }
   }
 
+  async createTable(): Promise<void> {
+    const url = `https://api.airtable.com/v0/meta/bases/${this.baseId}/tables`;
+    const resp = await fetch(url, {
+      method: 'POST',
+      headers: this.headers,
+      body: JSON.stringify({
+        name: this.tableName,
+        fields: [
+          { name: 'Task Name', type: 'singleLineText' },
+          {
+            name: 'Status',
+            type: 'singleSelect',
+            options: {
+              choices: [
+                { name: 'Not Started' },
+                { name: 'In Progress' },
+                { name: 'Deferred' },
+                { name: 'Waiting' },
+                { name: 'Completed' },
+              ],
+            },
+          },
+          { name: 'Description', type: 'multilineText' },
+          {
+            name: 'Priority',
+            type: 'singleSelect',
+            options: { choices: [{ name: 'High' }, { name: 'Medium' }, { name: 'Low' }] },
+          },
+          { name: 'Due Date', type: 'date', options: { dateFormat: { name: 'iso', format: 'YYYY-MM-DD' } } },
+          { name: 'Tags', type: 'multipleSelects', options: { choices: [] } },
+        ],
+      }),
+      signal: AbortSignal.timeout(15000),
+    });
+    if (!resp.ok) {
+      if (resp.status === 403) {
+        throw new Error(
+          'Airtable 403: Cannot create table — your token is missing the "schema.bases:write" scope. ' +
+          'Go to airtable.com → Account → Developer hub → edit your token and add that scope.',
+        );
+      }
+      throw new Error(`Airtable ${resp.status}: ${await resp.text()}`);
+    }
+  }
+
   async fetchTagOptions(tagsFieldName = 'Tags'): Promise<TagOption[]> {
     const metaUrl = `https://api.airtable.com/v0/meta/bases/${this.baseId}/tables`;
     try {

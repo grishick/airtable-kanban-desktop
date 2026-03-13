@@ -18,7 +18,7 @@ export interface Task {
 }
 
 export interface SyncStatus {
-  state: 'idle' | 'syncing' | 'error' | 'offline' | 'unconfigured';
+  state: 'idle' | 'syncing' | 'error' | 'offline' | 'unconfigured' | 'table_not_found';
   lastSync: string | null;
   error: string | null;
   pendingOps: number;
@@ -55,6 +55,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Sync
   triggerSync: (): Promise<void> =>
     ipcRenderer.invoke('sync:trigger'),
+  createTable: (): Promise<void> =>
+    ipcRenderer.invoke('airtable:createTable'),
   getSyncStatus: (): Promise<SyncStatus> =>
     ipcRenderer.invoke('sync:status'),
 

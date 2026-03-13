@@ -2,7 +2,7 @@ import { BrowserWindow } from 'electron';
 import * as db from './db';
 import { AirtableClient, AirtableFields, AirtableRecord } from './airtable';
 
-export type SyncState = 'idle' | 'syncing' | 'error' | 'offline' | 'unconfigured';
+export type SyncState = 'idle' | 'syncing' | 'error' | 'offline' | 'unconfigured' | 'table_not_found';
 
 export interface SyncStatus {
   state: SyncState;
@@ -28,8 +28,8 @@ export class SyncEngine {
   /** Re-read settings and recreate the Airtable client. */
   reinit(): void {
     const s = db.getSettings();
-    const token = s['airtable_access_token'] ?? process.env['AIRTABLE_ACCESS_TOKEN'] ?? '';
-    const baseId = s['airtable_base_id'] ?? process.env['AIRTABLE_BASE_ID'] ?? '';
+    const token = s['airtable_access_token'] ?? '';
+    const baseId = s['airtable_base_id'] ?? '';
     const tableName = s['airtable_table_name'] ?? 'Tasks';
 
     if (token && baseId) {
@@ -87,6 +87,16 @@ export class SyncEngine {
     this.broadcast('tasks:updated', db.getAllTasks());
   }
 
+  /** Create the Airtable table and immediately run a sync. */
+  async createTable(): Promise<void> {
+    if (!this.client) throw new Error('Airtable not configured');
+    await this.client.createTable();
+    this.state = 'idle';
+    this.lastError = null;
+    this.broadcastStatus();
+    await this.sync();
+  }
+
   /** Public entry point: run one full sync cycle. */
   async sync(): Promise<void> {
     if (!this.client) {
@@ -108,7 +118,11 @@ export class SyncEngine {
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       this.lastError = msg;
-      this.state = isNetworkError(msg) ? 'offline' : 'error';
+      if (isTableNotFoundError(msg)) {
+        this.state = 'table_not_found';
+      } else {
+        this.state = isNetworkError(msg) ? 'offline' : 'error';
+      }
     }
 
     this.broadcastStatus();
@@ -250,6 +264,16 @@ function airtableToTaskFields(record: AirtableRecord): Partial<db.Task> {
     due_date: f['Due Date'] ?? null,
     tags,
   };
+}
+
+function isTableNotFoundError(msg: string): boolean {
+  return (
+    msg.includes('Airtable 404') ||
+    msg.includes('TABLE_NOT_FOUND') ||
+    // Airtable returns 403 INVALID_PERMISSIONS_OR_MODEL_NOT_FOUND when the
+    // table name doesn't exist (it conflates "not found" with "no permission")
+    msg.includes('INVALID_PERMISSIONS_OR_MODEL_NOT_FOUND')
+  );
 }
 
 function isNetworkError(msg: string): boolean {

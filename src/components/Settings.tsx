@@ -54,6 +54,8 @@ export default function SettingsPage({ onSaved }: Props) {
         setStatusMsg({ text: 'Airtable is unreachable — working offline.', isError: true });
       } else if (s.state === 'error') {
         setStatusMsg({ text: `Sync error: ${s.error}`, isError: true });
+      } else if (s.state === 'table_not_found') {
+        setStatusMsg({ text: 'Connected! Table not found — go to Board and click "Create Tasks Table".', isError: false });
       } else {
         setStatusMsg({ text: 'Connection OK — sync completed.', isError: false });
       }
@@ -154,7 +156,9 @@ export default function SettingsPage({ onSaved }: Props) {
           <strong>Where to find these values:</strong>
           <ul style={{ marginTop: 6, paddingLeft: 18, lineHeight: 1.8 }}>
             <li>
-              <strong>Personal Access Token</strong>: airtable.com → Account → API → Create a token
+              <strong>Personal Access Token</strong>: airtable.com → Account → Developer hub → Create a token.
+              Required scopes: <code>data.records:read</code>, <code>data.records:write</code>,{' '}
+              <code>schema.bases:read</code>, <code>schema.bases:write</code> (needed to auto-create the table).
             </li>
             <li>
               <strong>Base ID</strong>: Open your base, look at the URL:{' '}

@@ -31,7 +31,7 @@ export const STATUSES: TaskStatus[] = [
 ];
 
 export interface SyncStatus {
-  state: 'idle' | 'syncing' | 'error' | 'offline' | 'unconfigured';
+  state: 'idle' | 'syncing' | 'error' | 'offline' | 'unconfigured' | 'table_not_found';
   lastSync: string | null;
   error: string | null;
   pendingOps: number;
@@ -61,6 +61,7 @@ export interface ElectronAPI {
   saveSettings(settings: Settings): Promise<void>;
 
   triggerSync(): Promise<void>;
+  createTable(): Promise<void>;
   getSyncStatus(): Promise<SyncStatus>;
 
   onSyncStatus(cb: (status: SyncStatus) => void): () => void;

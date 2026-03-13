@@ -1,6 +1,6 @@
 {
   "name": "airtable-kanban-desktop",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Trello-like Kanban UI for Airtable Tasks — works offline with local SQLite cache",
   "main": "dist/main/main.js",
   "scripts": {
@@ -16,16 +16,17 @@
     "dist": "npm run build && electron-builder"
   },
   "dependencies": {
-    "better-sqlite3": "^9.4.3"
+    "better-sqlite3": "^9.4.3",
+    "quill": "^2.0.3"
   },
   "devDependencies": {
-    "electron": "^28.3.3",
     "@types/better-sqlite3": "^7.6.8",
     "@types/react": "^18.2.79",
     "@types/react-dom": "^18.2.25",
     "@vitejs/plugin-react": "^4.2.1",
     "concurrently": "^8.2.2",
     "cross-env": "^7.0.3",
+    "electron": "^28.3.3",
     "electron-builder": "^26.8.1",
     "electron-rebuild": "^3.2.9",
     "react": "^18.2.0",
@@ -52,7 +53,13 @@
     "mac": {
       "category": "public.app-category.productivity",
       "target": [
-        { "target": "dmg", "arch": ["arm64", "x64"] }
+        {
+          "target": "dmg",
+          "arch": [
+            "arm64",
+            "x64"
+          ]
+        }
       ],
       "icon": "assets/icon.icns"
     }
