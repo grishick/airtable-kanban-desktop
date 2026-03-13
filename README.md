@@ -119,3 +119,9 @@ npm run typecheck
 - **Single instance**: no IPC locking; launching two instances of the app against the same DB is unsupported.
 - **Tags** must be a *Multiple select* field in Airtable; the app sends them as an array on sync.
 - **Rate limits**: Airtable's free tier allows 5 req/s per base. Bulk operations on many pending ops may hit limits; retry logic (max 5 attempts with error recording) handles transient failures.
+
+---
+
+## Test branch verification
+
+This section exists solely to confirm that the assistant has clone/push access. Feel free to delete it once you no longer need the verification history.
