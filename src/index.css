@@ -315,6 +315,13 @@ a {
   opacity: 0.5;
 }
 
+.drop-indicator {
+  height: 2px;
+  background: var(--accent);
+  border-radius: 1px;
+  margin: 2px 0;
+}
+
 .task-card-title {
   font-size: 13px;
   font-weight: 500;

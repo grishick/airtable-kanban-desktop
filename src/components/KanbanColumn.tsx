@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { Task, TaskStatus, TagOption } from '../types';
 import TaskCard from './TaskCard';
 import TaskModal from './TaskModal';
@@ -22,6 +22,19 @@ const STATUS_COLORS: Record<TaskStatus, string> = {
   'Completed':   'var(--col-completed)',
 };
 
+function calculatePosition(tasks: Task[], taskId: string, insertBeforeIndex: number): number {
+  const others = tasks.filter((t) => t.id !== taskId);
+  const originalIndex = tasks.findIndex((t) => t.id === taskId);
+  let idx = insertBeforeIndex;
+  if (originalIndex < insertBeforeIndex) idx--;
+  idx = Math.max(0, Math.min(idx, others.length));
+
+  if (others.length === 0) return 1000;
+  if (idx === 0) return others[0].position - 1000;
+  if (idx >= others.length) return others[others.length - 1].position + 1000;
+  return (others[idx - 1].position + others[idx].position) / 2;
+}
+
 export default function KanbanColumn({
   status,
   tasks,
@@ -37,6 +50,8 @@ export default function KanbanColumn({
   const [creating, setCreating] = useState(false);
   const [collapsed, setCollapsed] = useState(status === 'Completed');
   const [displayCount, setDisplayCount] = useState(pageSize);
+  const [dropIndex, setDropIndex] = useState<number | null>(null);
+  const draggingFromHere = useRef(false);
 
   // Reset display count when pageSize setting changes
   useEffect(() => {
@@ -50,12 +65,15 @@ export default function KanbanColumn({
   const handleDragOver = (e: React.DragEvent) => {
     e.preventDefault();
     e.dataTransfer.dropEffect = 'move';
-    setDragOver(true);
+    if (!draggingFromHere.current) {
+      setDragOver(true);
+    }
   };
 
   const handleDragLeave = (e: React.DragEvent) => {
     if (!e.currentTarget.contains(e.relatedTarget as Node)) {
       setDragOver(false);
+      setDropIndex(null);
     }
   };
 
@@ -63,12 +81,39 @@ export default function KanbanColumn({
     e.preventDefault();
     setDragOver(false);
     const taskId = e.dataTransfer.getData('taskId');
-    if (taskId) await onDrop(taskId, status);
+    if (!taskId) return;
+
+    const isWithinLane = draggingFromHere.current;
+    draggingFromHere.current = false;
+    const idx = dropIndex ?? visibleTasks.length;
+    setDropIndex(null);
+
+    if (isWithinLane) {
+      const newPosition = calculatePosition(tasks, taskId, idx);
+      await onUpdateTask(taskId, { position: newPosition });
+    } else {
+      await onDrop(taskId, status);
+    }
   };
 
   const handleCardDragStart = (e: React.DragEvent, taskId: string) => {
     e.dataTransfer.setData('taskId', taskId);
     e.dataTransfer.effectAllowed = 'move';
+    draggingFromHere.current = true;
+  };
+
+  const handleCardDragEnd = () => {
+    draggingFromHere.current = false;
+    setDropIndex(null);
+  };
+
+  const handleCardDragOver = (e: React.DragEvent, index: number) => {
+    if (!draggingFromHere.current) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    const isTopHalf = e.clientY < rect.top + rect.height / 2;
+    setDropIndex(isTopHalf ? index : index + 1);
   };
 
   return (
@@ -98,16 +143,23 @@ export default function KanbanColumn({
         {!collapsed && (
           <>
             <div className="column-body">
-              {visibleTasks.map((task) => (
-                <TaskCard
+              {visibleTasks.map((task, index) => (
+                <div
                   key={task.id}
-                  task={task}
-                  tagOptions={tagOptions}
-                  onClick={() => setEditingTask(task)}
-                  onDragStart={(e) => handleCardDragStart(e, task.id)}
-                  onToggleCheckbox={(nextDescription) => onUpdateTask(task.id, { description: nextDescription })}
-                />
+                  onDragOver={(e) => handleCardDragOver(e, index)}
+                >
+                  {dropIndex === index && <div className="drop-indicator" />}
+                  <TaskCard
+                    task={task}
+                    tagOptions={tagOptions}
+                    onClick={() => setEditingTask(task)}
+                    onDragStart={(e) => handleCardDragStart(e, task.id)}
+                    onDragEnd={handleCardDragEnd}
+                    onToggleCheckbox={(nextDescription) => onUpdateTask(task.id, { description: nextDescription })}
+                  />
+                </div>
               ))}
+              {dropIndex === visibleTasks.length && <div className="drop-indicator" />}
             </div>
 
             {hiddenCount > 0 && (

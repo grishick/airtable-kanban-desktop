@@ -7,10 +7,11 @@ interface Props {
   tagOptions: TagOption[];
   onClick: () => void;
   onDragStart: (e: React.DragEvent) => void;
+  onDragEnd?: (e: React.DragEvent) => void;
   onToggleCheckbox?: (nextDescription: string) => Promise<void>;
 }
 
-export default function TaskCard({ task, tagOptions, onClick, onDragStart, onToggleCheckbox }: Props) {
+export default function TaskCard({ task, tagOptions, onClick, onDragStart, onDragEnd, onToggleCheckbox }: Props) {
   const isOverdue =
     task.due_date && new Date(task.due_date) < new Date(new Date().toDateString());
 
@@ -30,6 +31,7 @@ export default function TaskCard({ task, tagOptions, onClick, onDragStart, onTog
       className="task-card"
       draggable
       onDragStart={onDragStart}
+      onDragEnd={onDragEnd}
       onClick={onClick}
       title="Click to edit"
     >
