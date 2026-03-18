@@ -14,9 +14,11 @@ import {
   AccountsFile,
 } from './accounts';
 import { fetchBaseName } from './airtable';
+import { startOAuthFlow } from './oauth';
 
 const isDev = process.env.NODE_ENV === 'development';
 let syncEngine: SyncEngine | null = null;
+let oauthAbortController: AbortController | null = null;
 
 function createWindow(): BrowserWindow {
   const win = new BrowserWindow({
@@ -108,6 +110,7 @@ function setupIPC(win: BrowserWindow): void {
     return {
       link_open_target: stored['link_open_target'] ?? 'browser',
       page_size: stored['page_size'] ? parseInt(stored['page_size'], 10) : 10,
+      oauth_lambda_url: stored['oauth_lambda_url'] ?? '',
     };
   });
 
@@ -117,6 +120,9 @@ function setupIPC(win: BrowserWindow): void {
     }
     if (settings.page_size !== undefined) {
       db.setSetting('page_size', String(settings.page_size));
+    }
+    if (settings.oauth_lambda_url !== undefined) {
+      db.setSetting('oauth_lambda_url', String(settings.oauth_lambda_url));
     }
     syncEngine?.reinit();
     if (syncEngine) void syncEngine.sync();
@@ -130,27 +136,40 @@ function setupIPC(win: BrowserWindow): void {
 
   ipcMain.handle('accounts:add', async (_event, data: {
     name?: string;
-    token: string;
+    authType?: 'pat' | 'oauth';
+    token?: string;
+    oauthAccessToken?: string;
+    oauthRefreshToken?: string;
+    oauthTokenExpiresAt?: string;
     baseId: string;
     tableName: string;
   }) => {
     const isFirstAccount = getActiveAccount() === null;
 
+    const tokenForName = data.authType === 'oauth'
+      ? (data.oauthAccessToken ?? '')
+      : (data.token ?? '');
+
     let name = data.name?.trim();
-    if (!name) {
-      const baseName = await fetchBaseName(data.token, data.baseId);
+    if (!name && tokenForName) {
+      const baseName = await fetchBaseName(tokenForName, data.baseId);
       name = baseName ?? 'New Account';
     }
+    name = name || 'New Account';
+    // If tokenForName is empty, auto-derivation is silently skipped — intentional.
 
     const { file } = addAccount({
       name,
+      authType: data.authType ?? 'pat',
       token: data.token,
+      oauthAccessToken: data.oauthAccessToken,
+      oauthRefreshToken: data.oauthRefreshToken,
+      oauthTokenExpiresAt: data.oauthTokenExpiresAt,
       baseId: data.baseId,
       tableName: data.tableName || 'Tasks',
     });
 
     if (isFirstAccount) {
-      // Switch DB to the newly created account's file
       const newActive = getActiveAccount()!;
       db.switchDB(dbPathForAccount(newActive.id));
       syncEngine?.reinit();
@@ -165,6 +184,9 @@ function setupIPC(win: BrowserWindow): void {
   ipcMain.handle('accounts:update', (_event, id: string, updates: {
     name?: string;
     token?: string;
+    oauthAccessToken?: string;
+    oauthRefreshToken?: string;
+    oauthTokenExpiresAt?: string;
     baseId?: string;
     tableName?: string;
   }) => {
@@ -173,7 +195,7 @@ function setupIPC(win: BrowserWindow): void {
 
     // Reinit sync if active account credentials changed
     const { activeId } = result.file;
-    if (id === activeId && (updates.token || updates.baseId || updates.tableName)) {
+    if (id === activeId && (updates.token || updates.oauthAccessToken || updates.baseId || updates.tableName)) {
       syncEngine?.reinit();
       if (syncEngine) void syncEngine.sync();
     }
@@ -276,6 +298,27 @@ function setupIPC(win: BrowserWindow): void {
       detail,
       buttons: ['OK'],
     });
+  });
+
+  // ── OAuth ──────────────────────────────────────────────────────────────
+  ipcMain.handle('accounts:startOAuth', async () => {
+    if (oauthAbortController) {
+      throw new Error('An OAuth flow is already in progress');
+    }
+    const lambdaUrl = db.getSettings()['oauth_lambda_url'] ?? '';
+    if (!lambdaUrl) throw new Error('OAuth Lambda URL is not configured in App Settings');
+
+    oauthAbortController = new AbortController();
+    try {
+      return await startOAuthFlow(lambdaUrl, oauthAbortController.signal);
+    } finally {
+      oauthAbortController = null;
+    }
+  });
+
+  ipcMain.handle('accounts:cancelOAuth', () => {
+    oauthAbortController?.abort();
+    oauthAbortController = null;
   });
 }
 
