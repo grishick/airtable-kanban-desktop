@@ -40,12 +40,17 @@ export interface SyncStatus {
 export interface Settings {
   link_open_target?: 'browser' | 'app';
   page_size?: number;
+  oauth_lambda_url?: string;
 }
 
 export interface Account {
   id: string;
   name: string;
-  token: string;
+  authType: 'pat' | 'oauth';     // treated as 'pat' if absent (backwards compat)
+  token?: string;                 // PAT only
+  oauthAccessToken?: string;      // OAuth only
+  oauthRefreshToken?: string;     // OAuth only
+  oauthTokenExpiresAt?: string;   // ISO 8601 string, OAuth only
   baseId: string;
   tableName: string;
 }
@@ -71,10 +76,29 @@ export interface ElectronAPI {
   saveSettings(settings: Settings): Promise<void>;
 
   listAccounts(): Promise<AccountsState>;
-  addAccount(data: { name?: string; token: string; baseId: string; tableName: string }): Promise<AccountsState>;
-  updateAccount(id: string, updates: { name?: string; token?: string; baseId?: string; tableName?: string }): Promise<AccountsState>;
+  addAccount(data: {
+    name?: string;
+    authType: 'pat' | 'oauth';
+    token?: string;
+    oauthAccessToken?: string;
+    oauthRefreshToken?: string;
+    oauthTokenExpiresAt?: string;
+    baseId: string;
+    tableName: string;
+  }): Promise<AccountsState>;
+  updateAccount(id: string, updates: {
+    name?: string;
+    token?: string;
+    oauthAccessToken?: string;
+    oauthRefreshToken?: string;
+    oauthTokenExpiresAt?: string;
+    baseId?: string;
+    tableName?: string;
+  }): Promise<AccountsState>;
   deleteAccount(id: string): Promise<AccountsState>;
   switchAccount(id: string): Promise<AccountsState>;
+  startOAuth(): Promise<{ accessToken: string; refreshToken: string; expiresAt: string }>;
+  cancelOAuth(): Promise<void>;
 
   triggerSync(): Promise<void>;
   createTable(): Promise<void>;
