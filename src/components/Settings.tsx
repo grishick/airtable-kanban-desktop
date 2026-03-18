@@ -22,6 +22,14 @@ export default function SettingsPage({ onSaved }: Props) {
   const [saving, setSaving] = useState(false);
   const [statusMsg, setStatusMsg] = useState<{ text: string; isError: boolean } | null>(null);
 
+  type AuthTab = 'pat' | 'oauth';
+  const [addAuthTab, setAddAuthTab] = useState<AuthTab>('pat');
+  const [oauthPending, setOauthPending] = useState(false);
+  const [oauthTokens, setOauthTokens] = useState<{
+    accessToken: string; refreshToken: string; expiresAt: string;
+  } | null>(null);
+  const [oauthLambdaUrl, setOauthLambdaUrl] = useState('');
+
   useEffect(() => {
     Promise.all([
       window.electronAPI.listAccounts(),
@@ -31,6 +39,7 @@ export default function SettingsPage({ onSaved }: Props) {
       setActiveId(activeId);
       setLinkTarget((settings as Settings).link_open_target ?? 'browser');
       setPageSize((settings as Settings).page_size ?? 10);
+      setOauthLambdaUrl((settings as Settings).oauth_lambda_url ?? '');
     }).catch(console.error);
   }, []);
 
@@ -46,11 +55,14 @@ export default function SettingsPage({ onSaved }: Props) {
     setFormTableName('Tasks');
     setEditMode('add');
     setStatusMsg(null);
+    setAddAuthTab('pat');
+    setOauthPending(false);
+    setOauthTokens(null);
   };
 
   const startEdit = (account: Account) => {
     setFormName(account.name);
-    setFormToken(account.token);
+    setFormToken(account.token ?? '');
     setFormBaseId(account.baseId);
     setFormTableName(account.tableName);
     setEditMode(account.id);
@@ -58,8 +70,59 @@ export default function SettingsPage({ onSaved }: Props) {
   };
 
   const cancelEdit = () => {
+    setOauthPending(false);
+    setOauthTokens(null);
+    if (oauthPending) {
+      window.electronAPI.cancelOAuth().catch(() => {});
+    }
     setEditMode('none');
     setStatusMsg(null);
+  };
+
+  const handleStartOAuth = async () => {
+    setOauthPending(true);
+    setStatusMsg(null);
+    try {
+      const tokens = await window.electronAPI.startOAuth();
+      setOauthTokens(tokens);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      const friendly: Record<string, string> = {
+        'Authorization was denied in the browser': 'Authorization was denied. Please try again.',
+        'Session expired — please try again': 'Session expired. Please try again.',
+        'Timed out waiting for Airtable authorization': 'Timed out. Please try again.',
+        'Cancelled': '',
+        'An OAuth flow is already in progress': 'Sign-in already in progress.',
+        'OAuth Lambda URL is not configured in App Settings': 'Set the OAuth Lambda URL in App Settings first.',
+      };
+      const display = friendly[msg] ?? msg;
+      if (display) setStatusMsg({ text: display, isError: true });
+    } finally {
+      setOauthPending(false);
+    }
+  };
+
+  const handleReauthenticate = async () => {
+    setOauthPending(true);
+    setStatusMsg(null);
+    try {
+      const tokens = await window.electronAPI.startOAuth();
+      if (editMode !== 'none' && editMode !== 'add') {
+        const result = await window.electronAPI.updateAccount(editMode, {
+          oauthAccessToken: tokens.accessToken,
+          oauthRefreshToken: tokens.refreshToken,
+          oauthTokenExpiresAt: tokens.expiresAt,
+        });
+        applyAccountsState(result);
+        setStatusMsg({ text: 'Re-authenticated successfully.', isError: false });
+        setEditMode('none');
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (msg !== 'Cancelled') setStatusMsg({ text: msg, isError: true });
+    } finally {
+      setOauthPending(false);
+    }
   };
 
   const handleAccountFormSubmit = async (e: React.FormEvent) => {
@@ -68,14 +131,35 @@ export default function SettingsPage({ onSaved }: Props) {
     setStatusMsg(null);
     try {
       if (editMode === 'add') {
-        const result = await window.electronAPI.addAccount({
-          name: formName.trim() || undefined,
-          token: formToken.trim(),
-          baseId: formBaseId.trim(),
-          tableName: formTableName.trim() || 'Tasks',
-        });
-        applyAccountsState(result);
-        setStatusMsg({ text: 'Account added.', isError: false });
+        if (addAuthTab === 'oauth') {
+          if (!oauthTokens) {
+            setStatusMsg({ text: 'Complete sign-in with Airtable first.', isError: true });
+            setSaving(false);
+            return;
+          }
+          const result = await window.electronAPI.addAccount({
+            authType: 'oauth',
+            name: formName.trim() || undefined,
+            oauthAccessToken: oauthTokens.accessToken,
+            oauthRefreshToken: oauthTokens.refreshToken,
+            oauthTokenExpiresAt: oauthTokens.expiresAt,
+            baseId: formBaseId.trim(),
+            tableName: formTableName.trim() || 'Tasks',
+          });
+          applyAccountsState(result);
+          setStatusMsg({ text: 'Account added.', isError: false });
+        } else {
+          const result = await window.electronAPI.addAccount({
+            authType: 'pat',
+            name: formName.trim() || undefined,
+            token: formToken.trim(),
+            baseId: formBaseId.trim(),
+            tableName: formTableName.trim() || 'Tasks',
+          });
+          applyAccountsState(result);
+          setStatusMsg({ text: 'Account added.', isError: false });
+        }
+        setEditMode('none');
       } else if (editMode !== 'none') {
         const result = await window.electronAPI.updateAccount(editMode, {
           name: formName.trim() || undefined,
@@ -85,8 +169,8 @@ export default function SettingsPage({ onSaved }: Props) {
         });
         applyAccountsState(result);
         setStatusMsg({ text: 'Account updated.', isError: false });
+        setEditMode('none');
       }
-      setEditMode('none');
     } catch (err) {
       setStatusMsg({ text: String(err), isError: true });
     } finally {
@@ -120,7 +204,7 @@ export default function SettingsPage({ onSaved }: Props) {
     setSaving(true);
     setStatusMsg(null);
     try {
-      await window.electronAPI.saveSettings({ link_open_target: linkTarget, page_size: pageSize });
+      await window.electronAPI.saveSettings({ link_open_target: linkTarget, page_size: pageSize, oauth_lambda_url: oauthLambdaUrl });
       setStatusMsg({ text: 'Settings saved. Sync will start automatically.', isError: false });
       setTimeout(() => onSaved(), 1000);
     } catch (err) {
@@ -209,6 +293,26 @@ export default function SettingsPage({ onSaved }: Props) {
               {editMode === 'add' ? 'Add Account' : 'Edit Account'}
             </h3>
 
+            {/* Auth type toggle — only when adding */}
+            {editMode === 'add' && (
+              <div className="auth-tab-toggle">
+                <button
+                  type="button"
+                  className={`auth-tab-btn${addAuthTab === 'pat' ? ' active' : ''}`}
+                  onClick={() => { setAddAuthTab('pat'); setOauthTokens(null); }}
+                >
+                  Personal Access Token
+                </button>
+                <button
+                  type="button"
+                  className={`auth-tab-btn${addAuthTab === 'oauth' ? ' active' : ''}`}
+                  onClick={() => { setAddAuthTab('oauth'); setOauthTokens(null); }}
+                >
+                  Sign in with Airtable
+                </button>
+              </div>
+            )}
+
             <div className="form-group">
               <label>Account Name</label>
               <input
@@ -219,41 +323,99 @@ export default function SettingsPage({ onSaved }: Props) {
               />
             </div>
 
-            <div className="form-group">
-              <label>Personal Access Token</label>
-              <input
-                type="password"
-                value={formToken}
-                onChange={(e) => setFormToken(e.target.value)}
-                placeholder="patXXXXXXXXXXXXXX"
-                autoComplete="off"
-                required
-              />
-            </div>
+            {/* PAT token field — shown for PAT tab (add) or PAT accounts (edit) */}
+            {(addAuthTab === 'pat' && editMode === 'add') ||
+             (editMode !== 'add' && accounts.find(a => a.id === editMode)?.authType !== 'oauth') ? (
+              <div className="form-group">
+                <label>Personal Access Token</label>
+                <input
+                  type="password"
+                  value={formToken}
+                  onChange={(e) => setFormToken(e.target.value)}
+                  placeholder="patXXXXXXXXXXXXXX"
+                  autoComplete="off"
+                  required
+                />
+              </div>
+            ) : null}
 
-            <div className="form-group">
-              <label>Base ID</label>
-              <input
-                type="text"
-                value={formBaseId}
-                onChange={(e) => setFormBaseId(e.target.value)}
-                placeholder="appXXXXXXXXXXXXXX"
-                required
-              />
-            </div>
+            {/* OAuth sign-in area — only when adding via OAuth tab */}
+            {addAuthTab === 'oauth' && editMode === 'add' && !oauthTokens && (
+              <div className="form-group">
+                {!oauthPending ? (
+                  <button type="button" className="btn btn-primary" onClick={handleStartOAuth}>
+                    Sign in with Airtable
+                  </button>
+                ) : (
+                  <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                    <span>Waiting for browser…</span>
+                    <button
+                      type="button"
+                      className="btn btn-secondary"
+                      onClick={() => { window.electronAPI.cancelOAuth().catch(() => {}); }}
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
 
-            <div className="form-group">
-              <label>Table Name</label>
-              <input
-                type="text"
-                value={formTableName}
-                onChange={(e) => setFormTableName(e.target.value)}
-                placeholder="Tasks"
-              />
-            </div>
+            {oauthTokens && editMode === 'add' && (
+              <p style={{ fontSize: 13, color: 'green', margin: '4px 0' }}>
+                ✓ Signed in — enter base details below
+              </p>
+            )}
+
+            {/* Re-authenticate button for editing OAuth accounts */}
+            {editMode !== 'add' && accounts.find(a => a.id === editMode)?.authType === 'oauth' && (
+              <div className="form-group">
+                {!oauthPending ? (
+                  <button type="button" className="btn btn-secondary" onClick={handleReauthenticate}>
+                    Re-authenticate
+                  </button>
+                ) : (
+                  <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                    <span>Waiting for browser…</span>
+                    <button
+                      type="button"
+                      className="btn btn-secondary"
+                      onClick={() => { window.electronAPI.cancelOAuth().catch(() => {}); }}
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Base ID and Table Name — shown for PAT tab, or after OAuth sign-in, or when editing */}
+            {(addAuthTab === 'pat' || oauthTokens || editMode !== 'add') && (
+              <>
+                <div className="form-group">
+                  <label>Base ID</label>
+                  <input
+                    type="text"
+                    value={formBaseId}
+                    onChange={(e) => setFormBaseId(e.target.value)}
+                    placeholder="appXXXXXXXXXXXXXX"
+                    required
+                  />
+                </div>
+                <div className="form-group">
+                  <label>Table Name</label>
+                  <input
+                    type="text"
+                    value={formTableName}
+                    onChange={(e) => setFormTableName(e.target.value)}
+                    placeholder="Tasks"
+                  />
+                </div>
+              </>
+            )}
 
             <div className="settings-actions">
-              <button type="submit" className="btn btn-primary" disabled={saving}>
+              <button type="submit" className="btn btn-primary" disabled={saving || oauthPending}>
                 {saving ? 'Saving…' : (editMode === 'add' ? 'Add Account' : 'Save Account')}
               </button>
               <button type="button" className="btn btn-secondary" onClick={cancelEdit}>
@@ -268,6 +430,17 @@ export default function SettingsPage({ onSaved }: Props) {
         {/* ── App Settings ── */}
         <h2>App Settings</h2>
         <form className="settings-form" onSubmit={handleSaveAppSettings}>
+          <div className="form-group">
+            <label htmlFor="oauth-lambda-url">OAuth Lambda URL</label>
+            <input
+              id="oauth-lambda-url"
+              type="url"
+              value={oauthLambdaUrl}
+              onChange={(e) => setOauthLambdaUrl(e.target.value)}
+              placeholder="https://xxxxxxxx.lambda-url.us-east-1.on.aws"
+            />
+          </div>
+
           <div className="form-group">
             <label htmlFor="link-target">Open links in</label>
             <select
