@@ -1,7 +1,7 @@
 import { BrowserWindow } from 'electron';
 import * as db from './db';
 import { AirtableClient, AirtableFields, AirtableRecord } from './airtable';
-import { getActiveAccount } from './accounts';
+import { getActiveAccount, getActiveToken, refreshOAuthTokenIfNeeded } from './accounts';
 
 export type SyncState = 'idle' | 'syncing' | 'error' | 'offline' | 'unconfigured' | 'table_not_found';
 
@@ -29,7 +29,7 @@ export class SyncEngine {
   /** Re-read active account and recreate the Airtable client. */
   reinit(): void {
     const account = getActiveAccount();
-    const token = account?.token ?? '';
+    const token = account ? getActiveToken(account) : '';
     const baseId = account?.baseId ?? '';
     const tableName = account?.tableName ?? 'Tasks';
 
@@ -100,6 +100,22 @@ export class SyncEngine {
 
   /** Public entry point: run one full sync cycle. */
   async sync(): Promise<void> {
+    // Refresh OAuth token if needed before attempting sync
+    const activeAccount = getActiveAccount();
+    if (activeAccount?.authType === 'oauth') {
+      try {
+        const lambdaUrl = db.getSettings()['oauth_lambda_url'] ?? '';
+        await refreshOAuthTokenIfNeeded(activeAccount, lambdaUrl);
+        this.reinit(); // re-reads accounts.json which now has the fresh token
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        this.lastError = `Re-authentication required: ${msg}`;
+        this.state = 'unconfigured';
+        this.broadcastStatus();
+        return;
+      }
+    }
+
     if (!this.client) {
       this.state = 'unconfigured';
       this.broadcastStatus();
