@@ -39,7 +39,10 @@ export async function handler(event) {
   const method = event.requestContext?.http?.method ?? event.httpMethod ?? 'GET';
   const path = event.requestContext?.http?.path ?? event.path ?? '/';
   const qs = event.queryStringParameters ?? {};
-  const body = event.body ? JSON.parse(event.body) : {};
+  let body = {};
+  if (event.body) {
+    try { body = JSON.parse(event.body); } catch { return jsonResponse({ error: 'invalid_body' }, 400); }
+  }
 
   if (method === 'POST' && path === '/start') return handleStart();
   if (method === 'GET'  && path === '/callback') return handleCallback(qs);
@@ -160,21 +163,35 @@ async function handleCallback(qs) {
 async function handleToken(qs) {
   if (!STATE_RE.test(qs.state ?? '')) return jsonResponse({ error: 'invalid_state' }, 400);
 
+  // First check if ready without deleting (non-destructive poll)
   const { Item } = await dynamo.send(new GetItemCommand({
     TableName: TABLE,
     Key: { state: { S: qs.state } },
   }));
 
   if (!Item) return jsonResponse({ error: 'not_found' }, 410);
-
   if (Item.error) {
+    // Atomically delete the error sentinel and return 403
     await dynamo.send(new DeleteItemCommand({ TableName: TABLE, Key: { state: { S: qs.state } } }));
     return jsonResponse({ error: 'access_denied' }, 403);
   }
-
   if (!Item.access_token) return jsonResponse({ error: 'not_ready' }, 404);
 
-  await dynamo.send(new DeleteItemCommand({ TableName: TABLE, Key: { state: { S: qs.state } } }));
+  // Atomically delete only if tokens are still present (prevents double-redemption)
+  try {
+    await dynamo.send(new DeleteItemCommand({
+      TableName: TABLE,
+      Key: { state: { S: qs.state } },
+      ConditionExpression: 'attribute_exists(access_token)',
+    }));
+  } catch (err) {
+    if (err.name === 'ConditionalCheckFailedException') {
+      // Already consumed by a concurrent request
+      return jsonResponse({ error: 'already_consumed' }, 410);
+    }
+    throw err;
+  }
+
   return jsonResponse({
     accessToken: Item.access_token.S,
     refreshToken: Item.refresh_token.S,
@@ -185,16 +202,22 @@ async function handleToken(qs) {
 async function handleRefresh(body) {
   if (!body.refreshToken) return jsonResponse({ error: 'missing_refresh_token' }, 400);
 
-  const resp = await fetch('https://airtable.com/oauth2/v1/token', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams({
-      grant_type: 'refresh_token',
-      refresh_token: body.refreshToken,
-      client_id: CLIENT_ID,
-      client_secret: CLIENT_SECRET,
-    }),
-  });
+  let resp;
+  try {
+    resp = await fetch('https://airtable.com/oauth2/v1/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        grant_type: 'refresh_token',
+        refresh_token: body.refreshToken,
+        client_id: CLIENT_ID,
+        client_secret: CLIENT_SECRET,
+      }),
+    });
+  } catch (err) {
+    console.error('Refresh fetch error:', err);
+    return jsonResponse({ error: 'refresh_failed' }, 401);
+  }
 
   if (!resp.ok) {
     const text = await resp.text();
