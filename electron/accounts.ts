@@ -6,9 +6,19 @@ import { randomUUID } from 'crypto';
 export interface Account {
   id: string;
   name: string;
-  token: string;
+  authType: 'pat' | 'oauth';
+  token?: string;
+  oauthAccessToken?: string;
+  oauthRefreshToken?: string;
+  oauthTokenExpiresAt?: string;
   baseId: string;
   tableName: string;
+}
+
+export function getActiveToken(account: Account): string {
+  return (account.authType ?? 'pat') === 'oauth'
+    ? (account.oauthAccessToken || '')   // || treats '' as absent (cleared tokens)
+    : (account.token ?? '');
 }
 
 export interface AccountsFile {
@@ -81,4 +91,61 @@ export function setActiveAccount(id: string): AccountsFile {
     saveAccountsFile(file);
   }
   return file;
+}
+
+export async function refreshOAuthTokenIfNeeded(
+  account: Account,
+  lambdaBaseUrl: string,
+): Promise<Account> {
+  if ((account.authType ?? 'pat') !== 'oauth') return account;
+
+  const expiry = account.oauthTokenExpiresAt
+    ? new Date(account.oauthTokenExpiresAt).getTime()
+    : NaN;
+  const needsRefresh = isNaN(expiry) || expiry - Date.now() < 5 * 60 * 1000;
+  if (!needsRefresh) return account;
+
+  let resp: Response;
+  try {
+    resp = await fetch(`${lambdaBaseUrl}/refresh`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ refreshToken: account.oauthRefreshToken }),
+      signal: AbortSignal.timeout(15000),
+    });
+  } catch (err) {
+    // Clear tokens using '' (not undefined — JSON.stringify drops undefined fields)
+    updateAccount(account.id, {
+      oauthAccessToken: '',
+      oauthRefreshToken: '',
+      oauthTokenExpiresAt: '',
+    });
+    throw err;
+  }
+
+  if (!resp.ok) {
+    const data = await resp.json().catch(() => ({})) as { error?: string };
+    // Clear tokens using '' (not undefined — JSON.stringify drops undefined fields)
+    updateAccount(account.id, {
+      oauthAccessToken: '',
+      oauthRefreshToken: '',
+      oauthTokenExpiresAt: '',
+    });
+    throw new Error(data.error ?? 'refresh_failed');
+  }
+
+  const tokens = await resp.json() as {
+    accessToken: string;
+    refreshToken: string;
+    expiresAt: string;
+  };
+
+  // Write back to accounts.json before returning (load-bearing: reinit() re-reads this file)
+  const result = updateAccount(account.id, {
+    oauthAccessToken: tokens.accessToken,
+    oauthRefreshToken: tokens.refreshToken,
+    oauthTokenExpiresAt: tokens.expiresAt,
+  });
+  if (!result) throw new Error('Account not found after refresh');
+  return result.account;
 }
