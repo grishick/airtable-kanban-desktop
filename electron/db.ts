@@ -32,9 +32,17 @@ export interface PendingOp {
 
 let db: Database.Database;
 
-export function initDB(): void {
-  const dbPath = path.join(app.getPath('userData'), 'kanban.db');
-  db = new Database(dbPath);
+export function initDB(dbPath?: string): void {
+  const resolvedPath = dbPath ?? path.join(app.getPath('userData'), 'kanban.db');
+  db = new Database(resolvedPath);
+  db.pragma('journal_mode = WAL');
+  db.pragma('foreign_keys = ON');
+  migrate();
+}
+
+export function switchDB(newPath: string): void {
+  try { db?.close(); } catch { /* ignore */ }
+  db = new Database(newPath);
   db.pragma('journal_mode = WAL');
   db.pragma('foreign_keys = ON');
   migrate();

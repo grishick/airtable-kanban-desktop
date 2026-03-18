@@ -38,11 +38,21 @@ export interface SyncStatus {
 }
 
 export interface Settings {
-  airtable_access_token?: string;
-  airtable_base_id?: string;
-  airtable_table_name?: string;
   link_open_target?: 'browser' | 'app';
   page_size?: number;
+}
+
+export interface Account {
+  id: string;
+  name: string;
+  token: string;
+  baseId: string;
+  tableName: string;
+}
+
+export interface AccountsState {
+  accounts: Account[];
+  activeId: string | null;
 }
 
 export interface TagOption {
@@ -60,12 +70,19 @@ export interface ElectronAPI {
   getSettings(): Promise<Settings>;
   saveSettings(settings: Settings): Promise<void>;
 
+  listAccounts(): Promise<AccountsState>;
+  addAccount(data: { name?: string; token: string; baseId: string; tableName: string }): Promise<AccountsState>;
+  updateAccount(id: string, updates: { name?: string; token?: string; baseId?: string; tableName?: string }): Promise<AccountsState>;
+  deleteAccount(id: string): Promise<AccountsState>;
+  switchAccount(id: string): Promise<AccountsState>;
+
   triggerSync(): Promise<void>;
   createTable(): Promise<void>;
   getSyncStatus(): Promise<SyncStatus>;
 
   onSyncStatus(cb: (status: SyncStatus) => void): () => void;
   onTasksUpdated(cb: (tasks: Task[]) => void): () => void;
+  onAccountsUpdated(cb: (state: AccountsState) => void): () => void;
 
   openExternal(url: string): Promise<void>;
   openLink(url: string): Promise<void>;

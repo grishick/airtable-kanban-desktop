@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
-import type { Task, SyncStatus, TagOption } from './types';
+import type { Task, SyncStatus, TagOption, Account } from './types';
 import KanbanBoard from './components/KanbanBoard';
 import Settings from './components/Settings';
 
@@ -10,6 +10,8 @@ export default function App() {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [tagOptions, setTagOptions] = useState<TagOption[]>([]);
   const [pageSize, setPageSize] = useState(10);
+  const [accounts, setAccounts] = useState<Account[]>([]);
+  const [activeAccountId, setActiveAccountId] = useState<string | null>(null);
   const [syncStatus, setSyncStatus] = useState<SyncStatus>({
     state: 'idle',
     lastSync: null,
@@ -39,6 +41,10 @@ export default function App() {
     }).catch(console.error);
     window.electronAPI.getTagOptions().then(setTagOptions).catch(console.error);
     loadSettings();
+    window.electronAPI.listAccounts().then(({ accounts, activeId }) => {
+      setAccounts(accounts);
+      setActiveAccountId(activeId);
+    }).catch(console.error);
   }, [loadSettings, autoNavigateToSettings]);
 
   // Subscribe to push events from main process
@@ -52,7 +58,11 @@ export default function App() {
       setSyncStatus(status);
       autoNavigateToSettings(status.state);
     });
-    return () => { unsub1(); unsub2(); };
+    const unsub3 = window.electronAPI.onAccountsUpdated(({ accounts, activeId }) => {
+      setAccounts(accounts);
+      setActiveAccountId(activeId);
+    });
+    return () => { unsub1(); unsub2(); unsub3(); };
   }, [autoNavigateToSettings]);
 
   // Show error dialog when sync fails (but not for transient offline state)
@@ -105,6 +115,15 @@ export default function App() {
     await window.electronAPI.triggerSync();
   }, []);
 
+  const handleSwitchAccount = useCallback(async (id: string) => {
+    try {
+      await window.electronAPI.switchAccount(id);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      await window.electronAPI.showError('Failed to Switch Account', msg);
+    }
+  }, []);
+
   const handleSettingsSaved = useCallback(() => {
     loadSettings();
     setPage('board');
@@ -144,6 +163,17 @@ export default function App() {
         >
           Settings
         </button>
+        {accounts.length > 1 && (
+          <select
+            className="account-switcher"
+            value={activeAccountId ?? ''}
+            onChange={(e) => handleSwitchAccount(e.target.value)}
+          >
+            {accounts.map((a) => (
+              <option key={a.id} value={a.id}>{a.name}</option>
+            ))}
+          </select>
+        )}
         <span className="header-spacer" />
         <div className="sync-bar">
           <span className={`sync-indicator ${syncStatus.state}`} title={syncStatus.error ?? ''} />

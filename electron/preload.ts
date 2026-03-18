@@ -25,9 +25,21 @@ export interface SyncStatus {
 }
 
 export interface Settings {
-  airtable_access_token?: string;
-  airtable_base_id?: string;
-  airtable_table_name?: string;
+  link_open_target?: 'browser' | 'app';
+  page_size?: number;
+}
+
+export interface Account {
+  id: string;
+  name: string;
+  token: string;
+  baseId: string;
+  tableName: string;
+}
+
+export interface AccountsState {
+  accounts: Account[];
+  activeId: string | null;
 }
 
 export interface TagOption {
@@ -51,6 +63,18 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('settings:get'),
   saveSettings: (settings: Settings): Promise<void> =>
     ipcRenderer.invoke('settings:save', settings),
+
+  // Accounts
+  listAccounts: (): Promise<AccountsState> =>
+    ipcRenderer.invoke('accounts:list'),
+  addAccount: (data: { name?: string; token: string; baseId: string; tableName: string }): Promise<AccountsState> =>
+    ipcRenderer.invoke('accounts:add', data),
+  updateAccount: (id: string, updates: { name?: string; token?: string; baseId?: string; tableName?: string }): Promise<AccountsState> =>
+    ipcRenderer.invoke('accounts:update', id, updates),
+  deleteAccount: (id: string): Promise<AccountsState> =>
+    ipcRenderer.invoke('accounts:delete', id),
+  switchAccount: (id: string): Promise<AccountsState> =>
+    ipcRenderer.invoke('accounts:switch', id),
 
   // Sync
   triggerSync: (): Promise<void> =>
@@ -84,5 +108,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
     const handler = (_event: Electron.IpcRendererEvent, tasks: Task[]) => cb(tasks);
     ipcRenderer.on('tasks:updated', handler);
     return () => ipcRenderer.removeListener('tasks:updated', handler);
+  },
+  onAccountsUpdated: (cb: (state: AccountsState) => void): (() => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, state: AccountsState) => cb(state);
+    ipcRenderer.on('accounts:updated', handler);
+    return () => ipcRenderer.removeListener('accounts:updated', handler);
   },
 });

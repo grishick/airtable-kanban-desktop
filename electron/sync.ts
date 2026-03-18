@@ -1,6 +1,7 @@
 import { BrowserWindow } from 'electron';
 import * as db from './db';
 import { AirtableClient, AirtableFields, AirtableRecord } from './airtable';
+import { getActiveAccount } from './accounts';
 
 export type SyncState = 'idle' | 'syncing' | 'error' | 'offline' | 'unconfigured' | 'table_not_found';
 
@@ -25,12 +26,12 @@ export class SyncEngine {
     this.reinit();
   }
 
-  /** Re-read settings and recreate the Airtable client. */
+  /** Re-read active account and recreate the Airtable client. */
   reinit(): void {
-    const s = db.getSettings();
-    const token = s['airtable_access_token'] ?? '';
-    const baseId = s['airtable_base_id'] ?? '';
-    const tableName = s['airtable_table_name'] ?? 'Tasks';
+    const account = getActiveAccount();
+    const token = account?.token ?? '';
+    const baseId = account?.baseId ?? '';
+    const tableName = account?.tableName ?? 'Tasks';
 
     if (token && baseId) {
       this.client = new AirtableClient(token, baseId, tableName);

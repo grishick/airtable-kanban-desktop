@@ -841,6 +841,93 @@ textarea {
   background: var(--pri-high-bg);
 }
 
+.settings-divider {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 24px 0;
+}
+
+/* ── Accounts list ────────────────────────────────────────────────────────── */
+.accounts-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.account-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--column-bg);
+}
+
+.account-row-active {
+  border-color: var(--accent);
+  background: var(--pri-low-bg);
+}
+
+.account-row-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  flex: 1;
+}
+
+.account-row-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  white-space: nowrap;
+}
+
+.account-row-base {
+  font-size: 12px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.account-active-badge {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--accent);
+  background: white;
+  border: 1px solid var(--accent);
+  border-radius: 10px;
+  padding: 1px 7px;
+  white-space: nowrap;
+}
+
+.account-row-actions {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.btn-sm {
+  padding: 4px 10px;
+  font-size: 12px;
+}
+
+/* ── Account switcher in header ───────────────────────────────────────────── */
+.account-switcher {
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--column-bg);
+  color: var(--text);
+  font-size: 13px;
+  cursor: pointer;
+  max-width: 160px;
+}
+
 /* ── Unconfigured banner ──────────────────────────────────────────────────── */
 .banner {
   padding: 10px 16px;

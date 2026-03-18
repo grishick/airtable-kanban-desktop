@@ -1,7 +1,19 @@
 import { app, BrowserWindow, ipcMain, dialog, shell } from 'electron';
 import path from 'path';
+import fs from 'fs';
 import * as db from './db';
 import { SyncEngine } from './sync';
+import {
+  loadAccountsFile,
+  getActiveAccount,
+  dbPathForAccount,
+  addAccount,
+  updateAccount,
+  deleteAccount,
+  setActiveAccount,
+  AccountsFile,
+} from './accounts';
+import { fetchBaseName } from './airtable';
 
 const isDev = process.env.NODE_ENV === 'development';
 let syncEngine: SyncEngine | null = null;
@@ -38,6 +50,12 @@ function createWindow(): BrowserWindow {
   return win;
 }
 
+function broadcastAccounts(win: BrowserWindow, file: AccountsFile): void {
+  if (!win.isDestroyed()) {
+    win.webContents.send('accounts:updated', { accounts: file.accounts, activeId: file.activeId });
+  }
+}
+
 function setupIPC(win: BrowserWindow): void {
   // ── Tasks ──────────────────────────────────────────────────────────────
   ipcMain.handle('tasks:get', () => {
@@ -54,10 +72,8 @@ function setupIPC(win: BrowserWindow): void {
     const task = db.updateTask(id, updates);
     if (!task) throw new Error(`Task not found: ${id}`);
 
-    // Coalesce into existing pending op for this task when possible
     const pendingCreate = db.getPendingOpByTaskAndType(id, 'create');
     if (pendingCreate) {
-      // Refresh the create payload so sync sends latest state
       db.updatePendingOpPayload(pendingCreate.id, JSON.stringify(task));
     } else {
       const pendingUpdate = db.getPendingOpByTaskAndType(id, 'update');
@@ -84,34 +100,127 @@ function setupIPC(win: BrowserWindow): void {
         payload: JSON.stringify({ airtable_id: task.airtable_id }),
       });
     }
-    // Task never reached Airtable — just remove from pending and leave soft-deleted
   });
 
   // ── Settings ───────────────────────────────────────────────────────────
   ipcMain.handle('settings:get', () => {
     const stored = db.getSettings();
-    // Merge env-var defaults (stored values win over env)
     return {
-      airtable_access_token:
-        stored['airtable_access_token'] ?? '',
-      airtable_base_id:
-        stored['airtable_base_id'] ?? '',
-      airtable_table_name:
-        stored['airtable_table_name'] ?? 'Tasks',
-      link_open_target:
-        stored['link_open_target'] ?? 'browser',
-      page_size:
-        stored['page_size'] ? parseInt(stored['page_size'], 10) : 10,
+      link_open_target: stored['link_open_target'] ?? 'browser',
+      page_size: stored['page_size'] ? parseInt(stored['page_size'], 10) : 10,
     };
   });
 
-  ipcMain.handle('settings:save', (_event, settings: Record<string, string>) => {
-    for (const [key, value] of Object.entries(settings)) {
-      db.setSetting(key, String(value));
+  ipcMain.handle('settings:save', (_event, settings: Record<string, string | number>) => {
+    if (settings.link_open_target !== undefined) {
+      db.setSetting('link_open_target', String(settings.link_open_target));
+    }
+    if (settings.page_size !== undefined) {
+      db.setSetting('page_size', String(settings.page_size));
     }
     syncEngine?.reinit();
-    // Trigger an immediate sync so the renderer learns about table state without waiting 30s
     if (syncEngine) void syncEngine.sync();
+  });
+
+  // ── Accounts ───────────────────────────────────────────────────────────
+  ipcMain.handle('accounts:list', () => {
+    const { accounts, activeId } = loadAccountsFile();
+    return { accounts, activeId };
+  });
+
+  ipcMain.handle('accounts:add', async (_event, data: {
+    name?: string;
+    token: string;
+    baseId: string;
+    tableName: string;
+  }) => {
+    const isFirstAccount = getActiveAccount() === null;
+
+    let name = data.name?.trim();
+    if (!name) {
+      const baseName = await fetchBaseName(data.token, data.baseId);
+      name = baseName ?? 'New Account';
+    }
+
+    const { file } = addAccount({
+      name,
+      token: data.token,
+      baseId: data.baseId,
+      tableName: data.tableName || 'Tasks',
+    });
+
+    if (isFirstAccount) {
+      // Switch DB to the newly created account's file
+      const newActive = getActiveAccount()!;
+      db.switchDB(dbPathForAccount(newActive.id));
+      syncEngine?.reinit();
+      if (!win.isDestroyed()) win.webContents.send('tasks:updated', db.getAllTasks());
+      if (syncEngine) void syncEngine.sync();
+    }
+
+    broadcastAccounts(win, file);
+    return { accounts: file.accounts, activeId: file.activeId };
+  });
+
+  ipcMain.handle('accounts:update', (_event, id: string, updates: {
+    name?: string;
+    token?: string;
+    baseId?: string;
+    tableName?: string;
+  }) => {
+    const result = updateAccount(id, updates);
+    if (!result) throw new Error(`Account not found: ${id}`);
+
+    // Reinit sync if active account credentials changed
+    const { activeId } = result.file;
+    if (id === activeId && (updates.token || updates.baseId || updates.tableName)) {
+      syncEngine?.reinit();
+      if (syncEngine) void syncEngine.sync();
+    }
+
+    broadcastAccounts(win, result.file);
+    return { accounts: result.file.accounts, activeId: result.file.activeId };
+  });
+
+  ipcMain.handle('accounts:delete', (_event, id: string) => {
+    const prevActive = getActiveAccount();
+    const file = deleteAccount(id);
+
+    // Delete the account's DB file
+    try { fs.unlinkSync(dbPathForAccount(id)); } catch { /* file may not exist */ }
+
+    // If the deleted account was active, switch to the new active one
+    if (prevActive?.id === id) {
+      const newActive = getActiveAccount();
+      const newDbPath = newActive
+        ? dbPathForAccount(newActive.id)
+        : path.join(app.getPath('userData'), 'kanban.db');
+      db.switchDB(newDbPath);
+      syncEngine?.reinit();
+      if (!win.isDestroyed()) {
+        win.webContents.send('tasks:updated', db.getAllTasks());
+        win.webContents.send('sync:status', syncEngine?.getStatus() ?? {
+          state: 'unconfigured', lastSync: null, error: null, pendingOps: 0,
+        });
+      }
+      if (syncEngine && newActive) void syncEngine.sync();
+    }
+
+    broadcastAccounts(win, file);
+    return { accounts: file.accounts, activeId: file.activeId };
+  });
+
+  ipcMain.handle('accounts:switch', (_event, id: string) => {
+    const file = setActiveAccount(id);
+    db.switchDB(dbPathForAccount(id));
+    syncEngine?.reinit();
+    if (!win.isDestroyed()) {
+      win.webContents.send('tasks:updated', db.getAllTasks());
+      win.webContents.send('sync:status', syncEngine!.getStatus());
+    }
+    if (syncEngine) void syncEngine.sync();
+    broadcastAccounts(win, file);
+    return { accounts: file.accounts, activeId: id };
   });
 
   // ── Sync ───────────────────────────────────────────────────────────────
@@ -171,8 +280,14 @@ function setupIPC(win: BrowserWindow): void {
 }
 
 app.whenReady().then(() => {
+  // Open the active account's DB, or fall back to the legacy kanban.db
+  const activeAccount = getActiveAccount();
+  const dbPath = activeAccount
+    ? dbPathForAccount(activeAccount.id)
+    : path.join(app.getPath('userData'), 'kanban.db');
+
   try {
-    db.initDB();
+    db.initDB(dbPath);
   } catch (err) {
     dialog.showErrorBox(
       'Database Error',
