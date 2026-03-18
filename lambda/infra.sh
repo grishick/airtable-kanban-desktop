@@ -19,6 +19,10 @@ aws dynamodb update-time-to-live \
   --time-to-live-specification "Enabled=true,AttributeName=ttl" \
   --region "$REGION"
 
+aws dynamodb wait table-exists \
+  --table-name "$TABLE_NAME" \
+  --region "$REGION"
+
 echo "=== Creating IAM role ==="
 TRUST='{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"Service":"lambda.amazonaws.com"},"Action":"sts:AssumeRole"}]}'
 ROLE_ARN=$(aws iam create-role \
