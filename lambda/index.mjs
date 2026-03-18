@@ -83,14 +83,25 @@ async function handleCallback(qs) {
 
   // 2. Handle user denial
   if (qs.error) {
-    await dynamo.send(new PutItemCommand({
-      TableName: TABLE,
-      Item: {
-        state: { S: qs.state },
-        error: { S: qs.error },
-        ttl: { N: String(ttlNow()) },
-      },
-    }));
+    try {
+      await dynamo.send(new UpdateItemCommand({
+        TableName: TABLE,
+        Key: { state: { S: qs.state } },
+        UpdateExpression: 'SET #err = :err, #ttl = :ttl',
+        ConditionExpression: 'attribute_exists(#state) AND attribute_not_exists(access_token)',
+        ExpressionAttributeNames: {
+          '#err': 'error',
+          '#ttl': 'ttl',
+          '#state': 'state',
+        },
+        ExpressionAttributeValues: {
+          ':err': { S: qs.error },
+          ':ttl': { N: String(ttlNow()) },
+        },
+      }));
+    } catch {
+      // Item doesn't exist or already has tokens — ignore, just show denial page
+    }
     return htmlResponse('Authorization denied — you can close this tab.');
   }
 
@@ -188,9 +199,7 @@ async function handleRefresh(body) {
   if (!resp.ok) {
     const text = await resp.text();
     console.error('Airtable refresh failed:', resp.status, text);
-    let errorCode = 'refresh_failed';
-    try { errorCode = JSON.parse(text).error ?? errorCode; } catch {}
-    return jsonResponse({ error: errorCode }, 401);
+    return jsonResponse({ error: 'refresh_failed' }, 401);
   }
 
   const data = await resp.json();
