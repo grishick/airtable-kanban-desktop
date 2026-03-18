@@ -70,9 +70,10 @@ export default function SettingsPage({ onSaved }: Props) {
   };
 
   const cancelEdit = () => {
+    const wasPending = oauthPending;
     setOauthPending(false);
     setOauthTokens(null);
-    if (oauthPending) {
+    if (wasPending) {
       window.electronAPI.cancelOAuth().catch(() => {});
     }
     setEditMode('none');
@@ -115,7 +116,7 @@ export default function SettingsPage({ onSaved }: Props) {
         });
         applyAccountsState(result);
         setStatusMsg({ text: 'Re-authenticated successfully.', isError: false });
-        setEditMode('none');
+        setTimeout(() => setEditMode('none'), 1500);
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -161,9 +162,10 @@ export default function SettingsPage({ onSaved }: Props) {
         }
         setEditMode('none');
       } else if (editMode !== 'none') {
+        const isOAuth = accounts.find(a => a.id === editMode)?.authType === 'oauth';
         const result = await window.electronAPI.updateAccount(editMode, {
           name: formName.trim() || undefined,
-          token: formToken.trim(),
+          ...(isOAuth ? {} : { token: formToken.trim() }),
           baseId: formBaseId.trim(),
           tableName: formTableName.trim() || 'Tasks',
         });
