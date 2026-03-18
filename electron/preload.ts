@@ -32,7 +32,11 @@ export interface Settings {
 export interface Account {
   id: string;
   name: string;
-  token: string;
+  authType: 'pat' | 'oauth';
+  token?: string;
+  oauthAccessToken?: string;
+  oauthRefreshToken?: string;
+  oauthTokenExpiresAt?: string;
   baseId: string;
   tableName: string;
 }
@@ -67,9 +71,26 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Accounts
   listAccounts: (): Promise<AccountsState> =>
     ipcRenderer.invoke('accounts:list'),
-  addAccount: (data: { name?: string; token: string; baseId: string; tableName: string }): Promise<AccountsState> =>
+  addAccount: (data: {
+    name?: string;
+    authType: 'pat' | 'oauth';
+    token?: string;
+    oauthAccessToken?: string;
+    oauthRefreshToken?: string;
+    oauthTokenExpiresAt?: string;
+    baseId: string;
+    tableName: string;
+  }): Promise<AccountsState> =>
     ipcRenderer.invoke('accounts:add', data),
-  updateAccount: (id: string, updates: { name?: string; token?: string; baseId?: string; tableName?: string }): Promise<AccountsState> =>
+  updateAccount: (id: string, updates: {
+    name?: string;
+    token?: string;
+    oauthAccessToken?: string;
+    oauthRefreshToken?: string;
+    oauthTokenExpiresAt?: string;
+    baseId?: string;
+    tableName?: string;
+  }): Promise<AccountsState> =>
     ipcRenderer.invoke('accounts:update', id, updates),
   deleteAccount: (id: string): Promise<AccountsState> =>
     ipcRenderer.invoke('accounts:delete', id),
@@ -114,4 +135,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('accounts:updated', handler);
     return () => ipcRenderer.removeListener('accounts:updated', handler);
   },
+
+  // OAuth
+  startOAuth: (): Promise<{ accessToken: string; refreshToken: string; expiresAt: string }> =>
+    ipcRenderer.invoke('accounts:startOAuth'),
+  cancelOAuth: (): Promise<void> =>
+    ipcRenderer.invoke('accounts:cancelOAuth'),
 });
