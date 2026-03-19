@@ -13,7 +13,7 @@ import {
   setActiveAccount,
   AccountsFile,
 } from './accounts';
-import { fetchBaseName } from './airtable';
+import { fetchBaseName, fetchBases, fetchTables } from './airtable';
 import { startOAuthFlow } from './oauth';
 
 const isDev = process.env.NODE_ENV === 'development';
@@ -252,6 +252,14 @@ function setupIPC(win: BrowserWindow): void {
 
   ipcMain.handle('airtable:createTable', async () => {
     if (syncEngine) await syncEngine.createTable();
+  });
+
+  ipcMain.handle('airtable:listBases', async (_event, { token }: { token: string }) => {
+    return fetchBases(token);
+  });
+
+  ipcMain.handle('airtable:listTables', async (_event, { token, baseId }: { token: string; baseId: string }) => {
+    return fetchTables(token, baseId);
   });
 
   ipcMain.handle('sync:status', () => {

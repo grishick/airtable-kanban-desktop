@@ -54,8 +54,8 @@ export async function fetchBases(token: string): Promise<{ id: string; name: str
     signal: AbortSignal.timeout(5000),
   });
   if (!resp.ok) throw new Error(`listBases failed: ${resp.status}`);
-  const data = await resp.json() as { bases: { id: string; name: string }[] };
-  return data.bases;
+  const data = await resp.json() as { bases?: { id: string; name: string }[] };
+  return data.bases ?? [];
 }
 
 export async function fetchTables(token: string, baseId: string): Promise<{ name: string }[]> {
@@ -64,8 +64,8 @@ export async function fetchTables(token: string, baseId: string): Promise<{ name
     signal: AbortSignal.timeout(5000),
   });
   if (!resp.ok) throw new Error(`listTables failed: ${resp.status}`);
-  const data = await resp.json() as { tables: { name: string }[] };
-  return data.tables.map(t => ({ name: t.name }));
+  const data = await resp.json() as { tables?: { name: string }[] };
+  return (data.tables ?? []).map(t => ({ name: t.name }));
 }
 
 export class AirtableClient {

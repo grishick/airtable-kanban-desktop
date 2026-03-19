@@ -29,6 +29,13 @@ export default function SettingsPage({ onSaved }: Props) {
     accessToken: string; refreshToken: string; expiresAt: string;
   } | null>(null);
   const [oauthLambdaUrl, setOauthLambdaUrl] = useState('');
+  const [bases, setBases] = useState<{ id: string; name: string }[]>([]);
+  const [basesLoading, setBasesLoading] = useState(false);
+  const [basesError, setBasesError] = useState('');
+  const [tables, setTables] = useState<{ name: string }[]>([]);
+  const [tablesLoading, setTablesLoading] = useState(false);
+  const [tablesError, setTablesError] = useState('');
+  const [tableMode, setTableMode] = useState<'existing' | 'new'>('new');
 
   useEffect(() => {
     Promise.all([
@@ -58,6 +65,13 @@ export default function SettingsPage({ onSaved }: Props) {
     setAddAuthTab('pat');
     setOauthPending(false);
     setOauthTokens(null);
+    setBases([]);
+    setBasesLoading(false);
+    setBasesError('');
+    setTables([]);
+    setTablesLoading(false);
+    setTablesError('');
+    setTableMode('new');
   };
 
   const startEdit = (account: Account) => {
@@ -80,12 +94,44 @@ export default function SettingsPage({ onSaved }: Props) {
     setStatusMsg(null);
   };
 
+  const fetchTablesForBase = async (token: string, baseId: string) => {
+    setTables([]);
+    setTablesLoading(true);
+    setTablesError('');
+    try {
+      const result = await window.electronAPI.listTables(token, baseId);
+      setTables(result);
+      setTableMode('existing');
+      setFormTableName(result[0]?.name ?? 'Tasks');
+    } catch {
+      setTablesError('Could not load tables — enter name manually');
+      setTableMode('new');
+      setFormTableName('Tasks');
+    } finally {
+      setTablesLoading(false);
+    }
+  };
+
   const handleStartOAuth = async () => {
     setOauthPending(true);
     setStatusMsg(null);
     try {
       const tokens = await window.electronAPI.startOAuth();
       setOauthTokens(tokens);
+      setBasesLoading(true);
+      setBasesError('');
+      try {
+        const result = await window.electronAPI.listBases(tokens.accessToken);
+        setBases(result);
+        if (result.length > 0) {
+          setFormBaseId(result[0].id);
+          await fetchTablesForBase(tokens.accessToken, result[0].id);
+        }
+      } catch {
+        setBasesError('Could not load bases — enter ID manually');
+      } finally {
+        setBasesLoading(false);
+      }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       const friendly: Record<string, string> = {
@@ -363,10 +409,87 @@ export default function SettingsPage({ onSaved }: Props) {
               </div>
             )}
 
+            {/* OAuth success: base picker (or fallback text input) */}
             {oauthTokens && editMode === 'add' && (
-              <p style={{ fontSize: 13, color: 'green', margin: '4px 0' }}>
-                ✓ Signed in — enter base details below
-              </p>
+              <>
+                <p style={{ fontSize: 13, color: 'green', margin: '4px 0' }}>✓ Signed in</p>
+                <div className="form-group">
+                  <label>Base</label>
+                  {basesError ? (
+                    <>
+                      <input
+                        type="text"
+                        value={formBaseId}
+                        onChange={(e) => setFormBaseId(e.target.value)}
+                        placeholder="appXXXXXXXXXXXXXX"
+                        required
+                      />
+                      <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>{basesError}</span>
+                    </>
+                  ) : (
+                    <select
+                      value={formBaseId}
+                      onChange={(e) => {
+                        setFormBaseId(e.target.value);
+                        fetchTablesForBase(oauthTokens.accessToken, e.target.value);
+                      }}
+                      disabled={basesLoading}
+                      required
+                    >
+                      {basesLoading
+                        ? <option value="">Loading bases…</option>
+                        : bases.map(b => <option key={b.id} value={b.id}>{b.name}</option>)
+                      }
+                    </select>
+                  )}
+                </div>
+
+                <div className="form-group">
+                  <label>Table</label>
+                  <select
+                    value={tableMode}
+                    onChange={(e) => {
+                      const mode = e.target.value as 'existing' | 'new';
+                      setTableMode(mode);
+                      if (mode === 'new') {
+                        setFormTableName('Tasks');
+                      } else {
+                        setFormTableName(tables[0]?.name ?? 'Tasks');
+                      }
+                    }}
+                    disabled={tablesLoading}
+                  >
+                    <option value="existing">Use existing table</option>
+                    <option value="new">Create new table</option>
+                  </select>
+
+                  {!tablesLoading && tableMode === 'existing' && tables.length > 0 && (
+                    <select
+                      value={formTableName}
+                      onChange={(e) => setFormTableName(e.target.value)}
+                      style={{ marginTop: 6 }}
+                    >
+                      {tables.map(t => <option key={t.name} value={t.name}>{t.name}</option>)}
+                    </select>
+                  )}
+
+                  {!tablesLoading && tableMode === 'new' && (
+                    <input
+                      type="text"
+                      value={formTableName}
+                      onChange={(e) => setFormTableName(e.target.value)}
+                      placeholder="Tasks"
+                      style={{ marginTop: 6 }}
+                    />
+                  )}
+
+                  {tablesError && (
+                    <span style={{ fontSize: 12, color: 'var(--text-muted)', display: 'block', marginTop: 4 }}>
+                      {tablesError}
+                    </span>
+                  )}
+                </div>
+              </>
             )}
 
             {/* Re-authenticate button for editing OAuth accounts */}
@@ -391,8 +514,8 @@ export default function SettingsPage({ onSaved }: Props) {
               </div>
             )}
 
-            {/* Base ID and Table Name — shown for PAT tab, or after OAuth sign-in, or when editing */}
-            {(addAuthTab === 'pat' || oauthTokens || editMode !== 'add') && (
+            {/* PAT tab or editing: plain text inputs */}
+            {(addAuthTab === 'pat' || editMode !== 'add') && (
               <>
                 <div className="form-group">
                   <label>Base ID</label>
@@ -417,7 +540,7 @@ export default function SettingsPage({ onSaved }: Props) {
             )}
 
             <div className="settings-actions">
-              <button type="submit" className="btn btn-primary" disabled={saving || oauthPending}>
+              <button type="submit" className="btn btn-primary" disabled={saving || oauthPending || basesLoading || tablesLoading}>
                 {saving ? 'Saving…' : (editMode === 'add' ? 'Add Account' : 'Save Account')}
               </button>
               <button type="button" className="btn btn-secondary" onClick={cancelEdit}>
@@ -487,23 +610,25 @@ export default function SettingsPage({ onSaved }: Props) {
           </div>
         </form>
 
-        <div style={{ marginTop: 24, fontSize: 12, color: 'var(--text-muted)' }}>
-          <strong>Where to find these values:</strong>
-          <ul style={{ marginTop: 6, paddingLeft: 18, lineHeight: 1.8 }}>
-            <li>
-              <strong>Personal Access Token</strong>: airtable.com → Account → Developer hub → Create a token.
-              Required scopes: <code>data.records:read</code>, <code>data.records:write</code>,{' '}
-              <code>schema.bases:read</code>, <code>schema.bases:write</code> (needed to auto-create the table).
-            </li>
-            <li>
-              <strong>Base ID</strong>: Open your base, look at the URL:{' '}
-              <code>airtable.com/appXXXXXX/…</code>
-            </li>
-            <li>
-              <strong>Table Name</strong>: The exact name of your table tab (default: Tasks)
-            </li>
-          </ul>
-        </div>
+        {!(addAuthTab === 'oauth' && oauthTokens && editMode === 'add') && (
+          <div style={{ marginTop: 24, fontSize: 12, color: 'var(--text-muted)' }}>
+            <strong>Where to find these values:</strong>
+            <ul style={{ marginTop: 6, paddingLeft: 18, lineHeight: 1.8 }}>
+              <li>
+                <strong>Personal Access Token</strong>: airtable.com → Account → Developer hub → Create a token.
+                Required scopes: <code>data.records:read</code>, <code>data.records:write</code>,{' '}
+                <code>schema.bases:read</code>, <code>schema.bases:write</code> (needed to auto-create the table).
+              </li>
+              <li>
+                <strong>Base ID</strong>: Open your base, look at the URL:{' '}
+                <code>airtable.com/appXXXXXX/…</code>
+              </li>
+              <li>
+                <strong>Table Name</strong>: The exact name of your table tab (default: Tasks)
+              </li>
+            </ul>
+          </div>
+        )}
 
       </div>
     </div>

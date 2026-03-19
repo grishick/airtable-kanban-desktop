@@ -142,4 +142,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('accounts:startOAuth'),
   cancelOAuth: (): Promise<void> =>
     ipcRenderer.invoke('accounts:cancelOAuth'),
+  listBases: (token: string) =>
+    ipcRenderer.invoke('airtable:listBases', { token }),
+  listTables: (token: string, baseId: string) =>
+    ipcRenderer.invoke('airtable:listTables', { token, baseId }),
 });

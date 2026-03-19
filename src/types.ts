@@ -99,6 +99,8 @@ export interface ElectronAPI {
   switchAccount(id: string): Promise<AccountsState>;
   startOAuth(): Promise<{ accessToken: string; refreshToken: string; expiresAt: string }>;
   cancelOAuth(): Promise<void>;
+  listBases(token: string): Promise<{ id: string; name: string }[]>;
+  listTables(token: string, baseId: string): Promise<{ name: string }[]>;
 
   triggerSync(): Promise<void>;
   createTable(): Promise<void>;
