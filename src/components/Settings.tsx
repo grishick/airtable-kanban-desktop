@@ -29,6 +29,7 @@ export default function SettingsPage({ onSaved }: Props) {
     accessToken: string; refreshToken: string; expiresAt: string;
   } | null>(null);
   const [oauthLambdaUrl, setOauthLambdaUrl] = useState('');
+  const [appVersion, setAppVersion] = useState('');
   const [bases, setBases] = useState<{ id: string; name: string }[]>([]);
   const [basesLoading, setBasesLoading] = useState(false);
   const [basesError, setBasesError] = useState('');
@@ -47,6 +48,7 @@ export default function SettingsPage({ onSaved }: Props) {
       setLinkTarget((settings as Settings).link_open_target ?? 'browser');
       setPageSize((settings as Settings).page_size ?? 10);
       setOauthLambdaUrl((settings as Settings).oauth_lambda_url ?? '');
+      setAppVersion((settings as Settings).app_version ?? '');
     }).catch(console.error);
   }, []);
 
@@ -628,6 +630,12 @@ export default function SettingsPage({ onSaved }: Props) {
               </li>
             </ul>
           </div>
+        )}
+
+        {appVersion && (
+          <p style={{ marginTop: 24, fontSize: 12, color: 'var(--text-muted)', textAlign: 'right' }}>
+            v{appVersion}
+          </p>
         )}
 
       </div>

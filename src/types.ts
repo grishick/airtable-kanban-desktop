@@ -41,6 +41,7 @@ export interface Settings {
   link_open_target?: 'browser' | 'app';
   page_size?: number;
   oauth_lambda_url?: string;
+  app_version?: string;
 }
 
 export interface Account {

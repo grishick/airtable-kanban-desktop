@@ -111,6 +111,7 @@ function setupIPC(win: BrowserWindow): void {
       link_open_target: stored['link_open_target'] ?? 'browser',
       page_size: stored['page_size'] ? parseInt(stored['page_size'], 10) : 10,
       oauth_lambda_url: stored['oauth_lambda_url'] ?? '',
+      app_version: app.getVersion(),
     };
   });
 
