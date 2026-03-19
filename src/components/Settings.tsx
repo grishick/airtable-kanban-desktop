@@ -47,7 +47,7 @@ export default function SettingsPage({ onSaved }: Props) {
       setActiveId(activeId);
       setLinkTarget((settings as Settings).link_open_target ?? 'browser');
       setPageSize((settings as Settings).page_size ?? 10);
-      setOauthLambdaUrl((settings as Settings).oauth_lambda_url ?? '');
+      setOauthLambdaUrl((settings as Settings).oauth_lambda_url ?? 'https://pbxi4xf6qvqzdalkhk5qlcmnzm0pzwau.lambda-url.us-east-1.on.aws');
       setAppVersion((settings as Settings).app_version ?? '');
     }).catch(console.error);
   }, []);

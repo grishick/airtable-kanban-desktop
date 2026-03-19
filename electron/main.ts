@@ -110,7 +110,7 @@ function setupIPC(win: BrowserWindow): void {
     return {
       link_open_target: stored['link_open_target'] ?? 'browser',
       page_size: stored['page_size'] ? parseInt(stored['page_size'], 10) : 10,
-      oauth_lambda_url: stored['oauth_lambda_url'] ?? '',
+      oauth_lambda_url: stored['oauth_lambda_url'] ?? 'https://pbxi4xf6qvqzdalkhk5qlcmnzm0pzwau.lambda-url.us-east-1.on.aws',
       app_version: app.getVersion(),
     };
   });
