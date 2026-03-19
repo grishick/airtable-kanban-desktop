@@ -112,6 +112,97 @@ npm run typecheck
 
 ---
 
+## OAuth Lambda Deployment
+
+The OAuth flow requires a small AWS Lambda function that acts as the OAuth server-side broker — it holds your `client_secret`, exchanges authorization codes for tokens, and hands them back to the desktop app via a short-lived DynamoDB session.
+
+### Prerequisites
+
+- [AWS CLI](https://docs.aws.amazon.com/cli/latest/userguide/install-cliv2.html) configured (`aws configure`) with a profile that has permissions to create Lambda, IAM, and DynamoDB resources
+- An **Airtable OAuth integration** — create one at <https://airtable.com/create/oauth> (you'll set the redirect URI after deployment)
+
+### First-time deployment
+
+```bash
+cd lambda
+bash infra.sh
+```
+
+The script does everything automatically:
+
+1. Creates a DynamoDB table `airtable-kanban-oauth` (on-demand billing, 90-second TTL)
+2. Creates an IAM role with the minimum permissions needed (DynamoDB CRUD + Lambda execution)
+3. Packages and deploys the function (`nodejs20.x`, 128 MB, 30 s timeout)
+4. Enables a **Lambda Function URL** with public access and CORS (`GET`, `POST`)
+5. Wires `LAMBDA_BASE_URL` back into the function environment
+
+At the end of the run it prints:
+
+```
+Function URL: https://<id>.lambda-url.<region>.on.aws/
+```
+
+This URL is your public HTTPS endpoint — no API Gateway needed.
+
+> **Region**: defaults to `us-east-1`. Override with `AWS_DEFAULT_REGION=us-west-2 bash infra.sh`.
+
+### Post-deployment steps
+
+**1. Finish registering your Airtable OAuth integration**
+
+In <https://airtable.com/create/oauth>, set the **Redirect URI** to:
+
+```
+https://<id>.lambda-url.<region>.on.aws/callback
+```
+
+Then copy the **Client ID** and **Client Secret** from the integration page.
+
+**2. Set real credentials on the Lambda**
+
+```bash
+aws lambda update-function-configuration \
+  --function-name airtable-kanban-oauth \
+  --environment 'Variables={
+    AIRTABLE_CLIENT_ID=<your-client-id>,
+    AIRTABLE_CLIENT_SECRET=<your-client-secret>,
+    DYNAMODB_TABLE=airtable-kanban-oauth,
+    LAMBDA_BASE_URL=https://<id>.lambda-url.<region>.on.aws
+  }'
+```
+
+> The `LAMBDA_BASE_URL` must not have a trailing slash and must match the redirect URI you registered with Airtable exactly.
+
+**3. Configure the desktop app**
+
+Open the app → Settings → **App Settings** → paste the Function URL into **OAuth Lambda URL**.
+
+### Updating the function code
+
+After editing `lambda/index.mjs`:
+
+```bash
+cd lambda
+bash deploy.sh
+```
+
+This repackages `index.mjs` + `node_modules` and calls `aws lambda update-function-code`.
+
+### How the HTTP endpoint works
+
+The Lambda Function URL exposes the function directly over HTTPS without API Gateway. Four routes are handled:
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/start` | Initiates OAuth: generates PKCE + state, returns `authUrl` |
+| `GET` | `/callback` | Airtable redirect target; exchanges code for tokens, stores in DynamoDB |
+| `GET` | `/token?state=…` | Polled by the desktop app; returns tokens once, then deletes the record |
+| `POST` | `/refresh` | Exchanges a refresh token for a new access token (client_secret stays server-side) |
+
+The Function URL is public (`auth-type NONE`) — security comes from the 64-hex-char `state` parameter that ties each session together.
+
+---
+
 ## Caveats / Known limitations
 
 - **Native module rebuild**: `better-sqlite3` must be compiled against Electron's Node headers. Run `npm run rebuild` if the app won't start.

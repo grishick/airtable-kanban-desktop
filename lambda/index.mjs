@@ -122,13 +122,14 @@ async function handleCallback(qs) {
   try {
     const resp = await fetch('https://airtable.com/oauth2/v1/token', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'Authorization': 'Basic ' + Buffer.from(`${CLIENT_ID}:${CLIENT_SECRET}`).toString('base64'),
+      },
       body: new URLSearchParams({
         grant_type: 'authorization_code',
         code: qs.code,
         redirect_uri: `${LAMBDA_BASE_URL}/callback`,
-        client_id: CLIENT_ID,
-        client_secret: CLIENT_SECRET,
         code_verifier: codeVerifier,
       }),
     });
@@ -206,12 +207,13 @@ async function handleRefresh(body) {
   try {
     resp = await fetch('https://airtable.com/oauth2/v1/token', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'Authorization': 'Basic ' + Buffer.from(`${CLIENT_ID}:${CLIENT_SECRET}`).toString('base64'),
+      },
       body: new URLSearchParams({
         grant_type: 'refresh_token',
         refresh_token: body.refreshToken,
-        client_id: CLIENT_ID,
-        client_secret: CLIENT_SECRET,
       }),
     });
   } catch (err) {
