@@ -48,6 +48,26 @@ export async function fetchBaseName(token: string, baseId: string): Promise<stri
   }
 }
 
+export async function fetchBases(token: string): Promise<{ id: string; name: string }[]> {
+  const resp = await fetch('https://api.airtable.com/v0/meta/bases', {
+    headers: { Authorization: `Bearer ${token}` },
+    signal: AbortSignal.timeout(5000),
+  });
+  if (!resp.ok) throw new Error(`listBases failed: ${resp.status}`);
+  const data = await resp.json() as { bases: { id: string; name: string }[] };
+  return data.bases;
+}
+
+export async function fetchTables(token: string, baseId: string): Promise<{ name: string }[]> {
+  const resp = await fetch(`https://api.airtable.com/v0/meta/bases/${baseId}/tables`, {
+    headers: { Authorization: `Bearer ${token}` },
+    signal: AbortSignal.timeout(5000),
+  });
+  if (!resp.ok) throw new Error(`listTables failed: ${resp.status}`);
+  const data = await resp.json() as { tables: { name: string }[] };
+  return data.tables.map(t => ({ name: t.name }));
+}
+
 export class AirtableClient {
   private readonly baseUrl = 'https://api.airtable.com/v0';
 
