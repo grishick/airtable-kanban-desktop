@@ -156,26 +156,8 @@ export class SyncEngine {
     try {
       await this.client.ensurePositionField();
       this.positionFieldEnsured = true;
-      await this.backfillPositions();
     } catch (err) {
       console.warn('[sync] failed to ensure Position field:', err);
-    }
-  }
-
-  /** Push local positions for all synced tasks so other devices pick them up. */
-  private async backfillPositions(): Promise<void> {
-    if (!this.client) return;
-    const allTasks = db.getAllTasks();
-    const pendingTaskIds = new Set(db.getPendingOps().map((op) => op.task_id));
-    const updates = allTasks
-      .filter(t => t.airtable_id && !pendingTaskIds.has(t.id))
-      .map(t => ({ id: t.airtable_id!, fields: { Position: t.position } as AirtableFields }));
-
-    if (updates.length === 0) return;
-    try {
-      await this.client.updateRecords(updates);
-    } catch (err) {
-      console.warn('[sync] position backfill failed:', err);
     }
   }
 
@@ -264,23 +246,43 @@ export class SyncEngine {
 
   private async pullFromAirtable(): Promise<void> {
     const records = await this.client!.fetchAllRecords();
-    // Tasks with pending ops should not be overwritten by a pull
     const pendingTaskIds = new Set(db.getPendingOps().map((op) => op.task_id));
+    const needsPositionBackfill: { id: string; fields: AirtableFields }[] = [];
 
     for (const record of records) {
       const existing = db.getTaskByAirtableId(record.id);
+      const hasRemotePosition = typeof record.fields.Position === 'number';
 
       if (existing) {
-        if (pendingTaskIds.has(existing.id)) continue; // Skip — local changes in queue
+        if (pendingTaskIds.has(existing.id)) continue;
         db.updateTask(existing.id, {
           ...airtableToTaskFields(record),
           synced_at: new Date().toISOString(),
         });
+        if (!hasRemotePosition) {
+          needsPositionBackfill.push({
+            id: record.id,
+            fields: { Position: existing.position },
+          });
+        }
       } else {
-        // Brand-new record from Airtable
         const fields = airtableToTaskFields(record);
         const position = fields.position ?? db.getMaxPosition(fields.status ?? 'Not Started') + 1000;
         db.createTask({ ...fields, position, airtable_id: record.id });
+        if (!hasRemotePosition) {
+          needsPositionBackfill.push({
+            id: record.id,
+            fields: { Position: position },
+          });
+        }
+      }
+    }
+
+    if (needsPositionBackfill.length > 0 && this.client) {
+      try {
+        await this.client.updateRecords(needsPositionBackfill);
+      } catch (err) {
+        console.warn('[sync] position backfill failed:', err);
       }
     }
   }

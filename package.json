@@ -1,6 +1,6 @@
 {
   "name": "airtable-kanban-desktop",
-  "version": "1.0.7",
+  "version": "1.0.8",
   "description": "Trello-like Kanban UI for Airtable Tasks — works offline with local SQLite cache",
   "main": "dist/main/main.js",
   "scripts": {
