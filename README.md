@@ -142,7 +142,34 @@ At the end of the run it prints:
 Function URL: https://<id>.lambda-url.<region>.on.aws/
 ```
 
-This URL is your public HTTPS endpoint — no API Gateway needed.
+This URL is your public HTTPS endpoint (Lambda Function URL).
+
+## Optional: API Gateway + Route53 custom domain
+
+If you want `https://your-domain.com` (instead of the Lambda Function URL hostname), put an **API Gateway REST API** in front of the same Lambda and attach a **custom domain** to it (Route53 DNS points to the API Gateway custom domain).
+
+The Lambda handler expects these routes (keep the paths exactly the same):
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/start` | Initiates OAuth: generates PKCE + state, returns `authUrl` |
+| `GET` | `/callback` | Airtable redirect target; exchanges code for tokens, stores in DynamoDB |
+| `GET` | `/token?state=…` | Polled by the desktop app; returns tokens once, then deletes the record |
+| `POST` | `/refresh` | Exchanges a refresh token for a new access token |
+
+High-level setup:
+
+1. Create a **REST API** in API Gateway.
+2. Add resources `/start`, `/callback`, `/token`, `/refresh`.
+3. For each method, configure an **AWS Lambda proxy integration** to the `airtable-kanban-oauth` Lambda.
+4. Deploy the API to a stage (for example `prod`).
+5. Create an API Gateway **custom domain** for your certificate and set **Base path mapping** to the deployed stage using base path `(none)` (so requests are like `https://your-domain.com/callback`).
+
+Troubleshooting note: if you see `403 Forbidden` on the custom domain endpoint, ensure the API Gateway custom domain **security policy** allows clients (set it to `TLS_1_2` instead of `TLS_1_3`).
+
+After you set up the custom domain, use:
+- OAuth redirect URI: `https://your-domain.com/callback`
+- App OAuth Lambda URL: `https://your-domain.com` (no trailing slash)
 
 > **Region**: defaults to `us-east-1`. Override with `AWS_DEFAULT_REGION=us-west-2 bash infra.sh`.
 
@@ -154,6 +181,12 @@ In <https://airtable.com/create/oauth>, set the **Redirect URI** to:
 
 ```
 https://<id>.lambda-url.<region>.on.aws/callback
+```
+
+If you are using an API Gateway custom domain, use:
+
+```
+https://your-domain.com/callback
 ```
 
 Then copy the **Client ID** and **Client Secret** from the integration page.
@@ -175,7 +208,9 @@ aws lambda update-function-configuration \
 
 **3. Configure the desktop app**
 
-Open the app → Settings → **App Settings** → paste the Function URL into **OAuth Lambda URL**.
+Open the app → Settings → **App Settings** → paste the endpoint base URL into **OAuth Lambda URL**:
+- Lambda Function URL base: `https://<id>.lambda-url.<region>.on.aws` (no trailing slash)
+- Or API Gateway custom domain base: `https://your-domain.com` (no trailing slash)
 
 ### Updating the function code
 
@@ -190,7 +225,7 @@ This repackages `index.mjs` + `node_modules` and calls `aws lambda update-functi
 
 ### How the HTTP endpoint works
 
-The Lambda Function URL exposes the function directly over HTTPS without API Gateway. Four routes are handled:
+Whether you use the Lambda Function URL or an API Gateway custom domain, the same four routes are handled:
 
 | Method | Path | Description |
 |--------|------|-------------|
@@ -199,7 +234,7 @@ The Lambda Function URL exposes the function directly over HTTPS without API Gat
 | `GET` | `/token?state=…` | Polled by the desktop app; returns tokens once, then deletes the record |
 | `POST` | `/refresh` | Exchanges a refresh token for a new access token (client_secret stays server-side) |
 
-The Function URL is public (`auth-type NONE`) — security comes from the 64-hex-char `state` parameter that ties each session together.
+The endpoint is public (`auth-type NONE` on Lambda; API Gateway typically has no authorizer) — security comes from the 64-hex-char `state` parameter that ties each session together.
 
 ---
 

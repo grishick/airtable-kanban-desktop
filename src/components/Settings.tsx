@@ -1,6 +1,9 @@
 import { useEffect, useState } from 'react';
 import type { Account, Settings } from '../types';
 
+const DEFAULT_OAUTH_LAMBDA_URL = 'https://airtable-kanban.widgeterian.com';
+const normalizeLambdaUrl = (url: string) => url.trim().replace(/\/+$/, '');
+
 interface Props {
   onSaved: () => void;
 }
@@ -47,7 +50,9 @@ export default function SettingsPage({ onSaved }: Props) {
       setActiveId(activeId);
       setLinkTarget((settings as Settings).link_open_target ?? 'browser');
       setPageSize((settings as Settings).page_size ?? 10);
-      setOauthLambdaUrl((settings as Settings).oauth_lambda_url ?? 'https://pbxi4xf6qvqzdalkhk5qlcmnzm0pzwau.lambda-url.us-east-1.on.aws');
+      setOauthLambdaUrl(
+        normalizeLambdaUrl((settings as Settings).oauth_lambda_url ?? DEFAULT_OAUTH_LAMBDA_URL),
+      );
       setAppVersion((settings as Settings).app_version ?? '');
     }).catch(console.error);
   }, []);
@@ -254,7 +259,12 @@ export default function SettingsPage({ onSaved }: Props) {
     setSaving(true);
     setStatusMsg(null);
     try {
-      await window.electronAPI.saveSettings({ link_open_target: linkTarget, page_size: pageSize, oauth_lambda_url: oauthLambdaUrl });
+      const cleanedOauthLambdaUrl = normalizeLambdaUrl(oauthLambdaUrl);
+      await window.electronAPI.saveSettings({
+        link_open_target: linkTarget,
+        page_size: pageSize,
+        oauth_lambda_url: cleanedOauthLambdaUrl || DEFAULT_OAUTH_LAMBDA_URL,
+      });
       setStatusMsg({ text: 'Settings saved. Sync will start automatically.', isError: false });
       setTimeout(() => onSaved(), 1000);
     } catch (err) {
@@ -564,7 +574,7 @@ export default function SettingsPage({ onSaved }: Props) {
               type="url"
               value={oauthLambdaUrl}
               onChange={(e) => setOauthLambdaUrl(e.target.value)}
-              placeholder="https://xxxxxxxx.lambda-url.us-east-1.on.aws"
+                  placeholder={DEFAULT_OAUTH_LAMBDA_URL}
             />
           </div>
 
