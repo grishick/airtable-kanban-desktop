@@ -21,6 +21,7 @@ export class SyncEngine {
   private lastSync: string | null = null;
   private lastError: string | null = null;
   private timer: ReturnType<typeof setTimeout> | null = null;
+  private positionFieldEnsured = false;
 
   constructor(private win: BrowserWindow) {
     this.reinit();
@@ -40,6 +41,7 @@ export class SyncEngine {
       this.client = null;
       this.state = 'unconfigured';
     }
+    this.positionFieldEnsured = false;
     this.broadcastStatus();
   }
 
@@ -126,6 +128,7 @@ export class SyncEngine {
     this.broadcastStatus();
 
     try {
+      await this.ensurePositionField();
       await this.pushPendingOps();
       await this.pullFromAirtable();
       await this.updateTagOptions();
@@ -144,6 +147,36 @@ export class SyncEngine {
 
     this.broadcastStatus();
     this.broadcastTasks();
+  }
+
+  // ── Schema migration ──────────────────────────────────────────────────
+
+  private async ensurePositionField(): Promise<void> {
+    if (this.positionFieldEnsured || !this.client) return;
+    try {
+      await this.client.ensurePositionField();
+      this.positionFieldEnsured = true;
+      await this.backfillPositions();
+    } catch (err) {
+      console.warn('[sync] failed to ensure Position field:', err);
+    }
+  }
+
+  /** Push local positions for all synced tasks so other devices pick them up. */
+  private async backfillPositions(): Promise<void> {
+    if (!this.client) return;
+    const allTasks = db.getAllTasks();
+    const pendingTaskIds = new Set(db.getPendingOps().map((op) => op.task_id));
+    const updates = allTasks
+      .filter(t => t.airtable_id && !pendingTaskIds.has(t.id))
+      .map(t => ({ id: t.airtable_id!, fields: { Position: t.position } as AirtableFields }));
+
+    if (updates.length === 0) return;
+    try {
+      await this.client.updateRecords(updates);
+    } catch (err) {
+      console.warn('[sync] position backfill failed:', err);
+    }
   }
 
   // ── Push ───────────────────────────────────────────────────────────────
@@ -246,7 +279,7 @@ export class SyncEngine {
       } else {
         // Brand-new record from Airtable
         const fields = airtableToTaskFields(record);
-        const position = db.getMaxPosition(fields.status ?? 'Not Started') + 1000;
+        const position = fields.position ?? db.getMaxPosition(fields.status ?? 'Not Started') + 1000;
         db.createTask({ ...fields, position, airtable_id: record.id });
       }
     }
@@ -259,6 +292,7 @@ function taskToFields(task: db.Task): AirtableFields {
   const fields: AirtableFields = {
     'Task Name': task.title,
     Status: task.status,
+    Position: task.position,
   };
   if (task.description) fields.Description = task.description;
   if (task.priority) fields.Priority = task.priority;
@@ -273,7 +307,7 @@ function airtableToTaskFields(record: AirtableRecord): Partial<db.Task> {
     ? f.Tags.join(', ')
     : (f.Tags as string | undefined) ?? null;
 
-  return {
+  const fields: Partial<db.Task> = {
     title: f['Task Name'] ?? 'Untitled',
     description: f.Description ?? '',
     status: f.Status ?? 'Not Started',
@@ -281,6 +315,8 @@ function airtableToTaskFields(record: AirtableRecord): Partial<db.Task> {
     due_date: f['Due Date'] ?? null,
     tags,
   };
+  if (typeof f.Position === 'number') fields.position = f.Position;
+  return fields;
 }
 
 function isTableNotFoundError(msg: string): boolean {

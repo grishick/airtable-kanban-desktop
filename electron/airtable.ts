@@ -3,15 +3,18 @@ export interface TagOption {
   color: string | null;
 }
 
-interface MetaTablesResponse {
-  tables: Array<{
+interface MetaTable {
+  id: string;
+  name: string;
+  fields: Array<{
     name: string;
-    fields: Array<{
-      name: string;
-      type: string;
-      options?: { choices?: Array<{ name: string; color?: string }> };
-    }>;
+    type: string;
+    options?: { choices?: Array<{ name: string; color?: string }> };
   }>;
+}
+
+interface MetaTablesResponse {
+  tables: MetaTable[];
 }
 
 export interface AirtableFields {
@@ -21,6 +24,7 @@ export interface AirtableFields {
   Priority?: string;
   'Due Date'?: string;
   Tags?: string | string[];
+  Position?: number;
 }
 
 export interface AirtableRecord {
@@ -148,6 +152,21 @@ export class AirtableClient {
     return resp.json() as Promise<AirtableRecord>;
   }
 
+  async updateRecords(updates: { id: string; fields: AirtableFields }[]): Promise<void> {
+    for (let i = 0; i < updates.length; i += 10) {
+      const batch = updates.slice(i, i + 10);
+      const resp = await fetch(this.tableUrl, {
+        method: 'PATCH',
+        headers: this.headers,
+        body: JSON.stringify({ records: batch }),
+        signal: AbortSignal.timeout(30000),
+      });
+      if (!resp.ok) {
+        throw new Error(`Airtable ${resp.status}: ${await resp.text()}`);
+      }
+    }
+  }
+
   async deleteRecord(recordId: string): Promise<void> {
     const resp = await fetch(`${this.tableUrl}/${recordId}`, {
       method: 'DELETE',
@@ -190,6 +209,7 @@ export class AirtableClient {
           },
           { name: 'Due Date', type: 'date', options: { dateFormat: { name: 'iso', format: 'YYYY-MM-DD' } } },
           { name: 'Tags', type: 'multipleSelects', options: { choices: [] } },
+          { name: 'Position', type: 'number', options: { precision: 1 } },
         ],
       }),
       signal: AbortSignal.timeout(15000),
@@ -203,6 +223,25 @@ export class AirtableClient {
       }
       throw new Error(`Airtable ${resp.status}: ${await resp.text()}`);
     }
+  }
+
+  async ensurePositionField(): Promise<void> {
+    const metaUrl = `https://api.airtable.com/v0/meta/bases/${this.baseId}/tables`;
+    const resp = await fetch(metaUrl, {
+      headers: this.headers,
+      signal: AbortSignal.timeout(10000),
+    });
+    if (!resp.ok) return;
+    const data = (await resp.json()) as MetaTablesResponse;
+    const table = data.tables.find((t) => t.name === this.tableName);
+    if (!table || table.fields.some((f) => f.name === 'Position')) return;
+
+    await fetch(`${metaUrl}/${table.id}/fields`, {
+      method: 'POST',
+      headers: this.headers,
+      body: JSON.stringify({ name: 'Position', type: 'number', options: { precision: 1 } }),
+      signal: AbortSignal.timeout(10000),
+    });
   }
 
   async fetchTagOptions(tagsFieldName = 'Tags'): Promise<TagOption[]> {
