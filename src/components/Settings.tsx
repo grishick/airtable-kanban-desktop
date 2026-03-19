@@ -132,6 +132,7 @@ export default function SettingsPage({ onSaved }: Props) {
         setBases(result);
         if (result.length > 0) {
           setFormBaseId(result[0].id);
+          if (!formName.trim()) setFormName(result[0].name);
           await fetchTablesForBase(tokens.accessToken, result[0].id);
         }
       } catch {
@@ -305,7 +306,30 @@ export default function SettingsPage({ onSaved }: Props) {
         <h2>Accounts</h2>
 
         {accounts.length === 0 && editMode !== 'add' && (
-          <p>No accounts yet. Add one to connect to Airtable.</p>
+          <div className="onboarding-block">
+            <p className="onboarding-heading">Connect to Airtable to get started</p>
+            <div className="onboarding-options">
+              <div className="onboarding-option">
+                <span className="onboarding-option-label">Already have an account?</span>
+                <button className="btn btn-primary" onClick={startAdd}>
+                  Add Account
+                </button>
+              </div>
+              <div className="onboarding-divider">or</div>
+              <div className="onboarding-option">
+                <span className="onboarding-option-label">New to Airtable?</span>
+                <button
+                  className="btn btn-secondary"
+                  onClick={() => window.electronAPI.openExternal('https://airtable.com/invite/r/V373PiX4')}
+                >
+                  Sign up for free
+                </button>
+                <span className="onboarding-hint">
+                  After signing up, come back here and click Add Account.
+                </span>
+              </div>
+            </div>
+          </div>
         )}
 
         {accounts.length > 0 && (
@@ -340,7 +364,7 @@ export default function SettingsPage({ onSaved }: Props) {
           </div>
         )}
 
-        {editMode === 'none' && (
+        {editMode === 'none' && accounts.length > 0 && (
           <button className="btn btn-secondary" style={{ marginTop: 12 }} onClick={startAdd}>
             + Add Account
           </button>
@@ -443,6 +467,8 @@ export default function SettingsPage({ onSaved }: Props) {
                       value={formBaseId}
                       onChange={(e) => {
                         setFormBaseId(e.target.value);
+                        const selectedBase = bases.find(b => b.id === e.target.value);
+                        if (selectedBase) setFormName(selectedBase.name);
                         fetchTablesForBase(oauthTokens.accessToken, e.target.value);
                       }}
                       disabled={basesLoading}

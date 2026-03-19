@@ -36,13 +36,8 @@ interface ListResponse {
 
 export async function fetchBaseName(token: string, baseId: string): Promise<string | null> {
   try {
-    const resp = await fetch(`https://api.airtable.com/v0/meta/bases/${baseId}`, {
-      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-      signal: AbortSignal.timeout(5000),
-    });
-    if (!resp.ok) return null;
-    const data = (await resp.json()) as { name?: string };
-    return data.name ?? null;
+    const bases = await fetchBases(token);
+    return bases.find(b => b.id === baseId)?.name ?? null;
   } catch {
     return null;
   }
