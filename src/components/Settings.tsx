@@ -22,6 +22,7 @@ export default function SettingsPage({ onSaved }: Props) {
 
   const [linkTarget, setLinkTarget] = useState<'browser' | 'app'>('browser');
   const [pageSize, setPageSize] = useState(10);
+  const [syncInterval, setSyncInterval] = useState(60);
   const [saving, setSaving] = useState(false);
   const [statusMsg, setStatusMsg] = useState<{ text: string; isError: boolean } | null>(null);
 
@@ -50,6 +51,7 @@ export default function SettingsPage({ onSaved }: Props) {
       setActiveId(activeId);
       setLinkTarget((settings as Settings).link_open_target ?? 'browser');
       setPageSize((settings as Settings).page_size ?? 10);
+      setSyncInterval((settings as Settings).sync_interval_seconds ?? 60);
       setOauthLambdaUrl(
         normalizeLambdaUrl((settings as Settings).oauth_lambda_url ?? DEFAULT_OAUTH_LAMBDA_URL),
       );
@@ -264,6 +266,7 @@ export default function SettingsPage({ onSaved }: Props) {
       await window.electronAPI.saveSettings({
         link_open_target: linkTarget,
         page_size: pageSize,
+        sync_interval_seconds: syncInterval,
         oauth_lambda_url: cleanedOauthLambdaUrl || DEFAULT_OAUTH_LAMBDA_URL,
       });
       setStatusMsg({ text: 'Settings saved. Sync will start automatically.', isError: false });
@@ -625,6 +628,18 @@ export default function SettingsPage({ onSaved }: Props) {
               max={200}
               value={pageSize}
               onChange={(e) => setPageSize(Math.max(1, parseInt(e.target.value, 10) || 1))}
+            />
+          </div>
+
+          <div className="form-group">
+            <label htmlFor="sync-interval">Sync interval (seconds)</label>
+            <input
+              id="sync-interval"
+              type="number"
+              min={10}
+              max={3600}
+              value={syncInterval}
+              onChange={(e) => setSyncInterval(Math.max(10, parseInt(e.target.value, 10) || 60))}
             />
           </div>
 

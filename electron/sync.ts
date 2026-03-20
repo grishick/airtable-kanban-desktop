@@ -12,7 +12,7 @@ export interface SyncStatus {
   pendingOps: number;
 }
 
-const SYNC_INTERVAL_MS = 60_000;
+const DEFAULT_SYNC_INTERVAL_MS = 60_000;
 const MAX_RETRIES = 5;
 
 export class SyncEngine {
@@ -24,6 +24,7 @@ export class SyncEngine {
   private startupTimer: ReturnType<typeof setTimeout> | null = null;
   private positionFieldEnsured = false;
   private powerSaveId: number | null = null;
+  private intervalMs = DEFAULT_SYNC_INTERVAL_MS;
 
   constructor(private win: BrowserWindow) {
     this.reinit();
@@ -53,7 +54,7 @@ export class SyncEngine {
     this.startupTimer = setTimeout(() => {
       this.startupTimer = null;
       void this.sync();
-      this.timer = setInterval(() => void this.sync(), SYNC_INTERVAL_MS);
+      this.timer = setInterval(() => void this.sync(), this.intervalMs);
     }, 3000);
   }
 
@@ -69,6 +70,15 @@ export class SyncEngine {
     if (this.powerSaveId !== null) {
       powerSaveBlocker.stop(this.powerSaveId);
       this.powerSaveId = null;
+    }
+  }
+
+  /** Update the sync interval. Restarts the timer if already running. */
+  setInterval(seconds: number): void {
+    this.intervalMs = Math.max(10, seconds) * 1000;
+    if (this.timer) {
+      clearInterval(this.timer);
+      this.timer = setInterval(() => void this.sync(), this.intervalMs);
     }
   }
 

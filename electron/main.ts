@@ -110,6 +110,7 @@ function setupIPC(win: BrowserWindow): void {
     return {
       link_open_target: stored['link_open_target'] ?? 'browser',
       page_size: stored['page_size'] ? parseInt(stored['page_size'], 10) : 10,
+      sync_interval_seconds: stored['sync_interval_seconds'] ? parseInt(stored['sync_interval_seconds'], 10) : 60,
       oauth_lambda_url: stored['oauth_lambda_url'] ?? 'https://airtable-kanban.widgeterian.com',
       app_version: app.getVersion(),
     };
@@ -121,6 +122,10 @@ function setupIPC(win: BrowserWindow): void {
     }
     if (settings.page_size !== undefined) {
       db.setSetting('page_size', String(settings.page_size));
+    }
+    if (settings.sync_interval_seconds !== undefined) {
+      db.setSetting('sync_interval_seconds', String(settings.sync_interval_seconds));
+      syncEngine?.setInterval(Number(settings.sync_interval_seconds));
     }
     if (settings.oauth_lambda_url !== undefined) {
       db.setSetting('oauth_lambda_url', String(settings.oauth_lambda_url));
@@ -352,6 +357,8 @@ app.whenReady().then(() => {
   const win = createWindow();
   setupIPC(win);
   syncEngine = new SyncEngine(win);
+  const savedInterval = db.getSettings()['sync_interval_seconds'];
+  if (savedInterval) syncEngine.setInterval(parseInt(savedInterval, 10));
   syncEngine.start();
 
   app.on('activate', () => {
