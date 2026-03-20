@@ -1,4 +1,4 @@
-import { BrowserWindow } from 'electron';
+import { BrowserWindow, powerSaveBlocker } from 'electron';
 import * as db from './db';
 import { AirtableClient, AirtableFields, AirtableRecord } from './airtable';
 import { getActiveAccount, getActiveToken, refreshOAuthTokenIfNeeded } from './accounts';
@@ -12,7 +12,7 @@ export interface SyncStatus {
   pendingOps: number;
 }
 
-const SYNC_INTERVAL_MS = 30_000;
+const SYNC_INTERVAL_MS = 60_000;
 const MAX_RETRIES = 5;
 
 export class SyncEngine {
@@ -20,8 +20,10 @@ export class SyncEngine {
   private state: SyncState = 'idle';
   private lastSync: string | null = null;
   private lastError: string | null = null;
-  private timer: ReturnType<typeof setTimeout> | null = null;
+  private timer: ReturnType<typeof setInterval> | null = null;
+  private startupTimer: ReturnType<typeof setTimeout> | null = null;
   private positionFieldEnsured = false;
+  private powerSaveId: number | null = null;
 
   constructor(private win: BrowserWindow) {
     this.reinit();
@@ -47,24 +49,27 @@ export class SyncEngine {
 
   /** Begin periodic sync loop. */
   start(): void {
-    // Run first sync soon after startup, then on interval
-    this.timer = setTimeout(() => {
+    this.powerSaveId = powerSaveBlocker.start('prevent-app-suspension');
+    this.startupTimer = setTimeout(() => {
+      this.startupTimer = null;
       void this.sync();
-      this.scheduleLoop();
+      this.timer = setInterval(() => void this.sync(), SYNC_INTERVAL_MS);
     }, 3000);
   }
 
   stop(): void {
+    if (this.startupTimer) {
+      clearTimeout(this.startupTimer);
+      this.startupTimer = null;
+    }
     if (this.timer) {
-      clearTimeout(this.timer);
+      clearInterval(this.timer);
       this.timer = null;
     }
-  }
-
-  private scheduleLoop(): void {
-    this.timer = setInterval(() => {
-      void this.sync();
-    }, SYNC_INTERVAL_MS);
+    if (this.powerSaveId !== null) {
+      powerSaveBlocker.stop(this.powerSaveId);
+      this.powerSaveId = null;
+    }
   }
 
   getStatus(): SyncStatus {
