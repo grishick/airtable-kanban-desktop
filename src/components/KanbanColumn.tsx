@@ -51,7 +51,9 @@ export default function KanbanColumn({
   const [collapsed, setCollapsed] = useState(status === 'Completed');
   const [displayCount, setDisplayCount] = useState(pageSize);
   const [dropIndex, setDropIndex] = useState<number | null>(null);
+  const dropIndexRef = useRef<number | null>(null);
   const draggingFromHere = useRef(false);
+  const draggedIndex = useRef<number | null>(null);
 
   // Reset display count when pageSize setting changes
   useEffect(() => {
@@ -74,6 +76,7 @@ export default function KanbanColumn({
     if (!e.currentTarget.contains(e.relatedTarget as Node)) {
       setDragOver(false);
       setDropIndex(null);
+      dropIndexRef.current = null;
     }
   };
 
@@ -85,8 +88,10 @@ export default function KanbanColumn({
 
     const isWithinLane = draggingFromHere.current;
     draggingFromHere.current = false;
-    const idx = dropIndex ?? visibleTasks.length;
+    draggedIndex.current = null;
+    const idx = dropIndexRef.current ?? visibleTasks.length;
     setDropIndex(null);
+    dropIndexRef.current = null;
 
     if (isWithinLane) {
       const newPosition = calculatePosition(tasks, taskId, idx);
@@ -96,24 +101,42 @@ export default function KanbanColumn({
     }
   };
 
-  const handleCardDragStart = (e: React.DragEvent, taskId: string) => {
+  const handleCardDragStart = (e: React.DragEvent, taskId: string, index: number) => {
     e.dataTransfer.setData('taskId', taskId);
     e.dataTransfer.effectAllowed = 'move';
     draggingFromHere.current = true;
+    draggedIndex.current = index;
   };
 
   const handleCardDragEnd = () => {
     draggingFromHere.current = false;
+    draggedIndex.current = null;
     setDropIndex(null);
+    dropIndexRef.current = null;
   };
 
   const handleCardDragOver = (e: React.DragEvent, index: number) => {
     if (!draggingFromHere.current) return;
     e.preventDefault();
     e.stopPropagation();
+
+    const dragIdx = draggedIndex.current;
+    if (dragIdx !== null && index === dragIdx) return;
+
     const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
     const isTopHalf = e.clientY < rect.top + rect.height / 2;
-    setDropIndex(isTopHalf ? index : index + 1);
+    let newDropIndex = isTopHalf ? index : index + 1;
+
+    if (dragIdx !== null && (newDropIndex === dragIdx || newDropIndex === dragIdx + 1)) {
+      if (index < dragIdx) {
+        newDropIndex = index;
+      } else {
+        newDropIndex = index + 1;
+      }
+    }
+
+    setDropIndex(newDropIndex);
+    dropIndexRef.current = newDropIndex;
   };
 
   return (
@@ -153,7 +176,7 @@ export default function KanbanColumn({
                     task={task}
                     tagOptions={tagOptions}
                     onClick={() => setEditingTask(task)}
-                    onDragStart={(e) => handleCardDragStart(e, task.id)}
+                    onDragStart={(e) => handleCardDragStart(e, task.id, index)}
                     onDragEnd={handleCardDragEnd}
                     onToggleCheckbox={(nextDescription) => onUpdateTask(task.id, { description: nextDescription })}
                   />
