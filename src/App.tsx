@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
-import type { Task, SyncStatus, TagOption, Account } from './types';
+import type { Task, SyncStatus, TagOption, Account, Collaborator } from './types';
 import KanbanBoard from './components/KanbanBoard';
 import Settings from './components/Settings';
 
@@ -9,6 +9,7 @@ export default function App() {
   const [page, setPage] = useState<Page>('board');
   const [tasks, setTasks] = useState<Task[]>([]);
   const [tagOptions, setTagOptions] = useState<TagOption[]>([]);
+  const [collaborators, setCollaborators] = useState<Collaborator[]>([]);
   const [pageSize, setPageSize] = useState(10);
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [activeAccountId, setActiveAccountId] = useState<string | null>(null);
@@ -40,6 +41,7 @@ export default function App() {
       autoNavigateToSettings(status.state);
     }).catch(console.error);
     window.electronAPI.getTagOptions().then(setTagOptions).catch(console.error);
+    window.electronAPI.getCollaborators().then(setCollaborators).catch(console.error);
     loadSettings();
     window.electronAPI.listAccounts().then(({ accounts, activeId }) => {
       setAccounts(accounts);
@@ -51,9 +53,9 @@ export default function App() {
   useEffect(() => {
     const unsub1 = window.electronAPI.onTasksUpdated((tasks) => {
       setTasks(tasks);
-      // Re-fetch tag options after sync (sync may have updated them)
       window.electronAPI.getTagOptions().then(setTagOptions).catch(console.error);
     });
+    const unsub4 = window.electronAPI.onCollaboratorsUpdated(setCollaborators);
     const unsub2 = window.electronAPI.onSyncStatus((status) => {
       setSyncStatus(status);
       autoNavigateToSettings(status.state);
@@ -62,7 +64,7 @@ export default function App() {
       setAccounts(accounts);
       setActiveAccountId(activeId);
     });
-    return () => { unsub1(); unsub2(); unsub3(); };
+    return () => { unsub1(); unsub2(); unsub3(); unsub4(); };
   }, [autoNavigateToSettings]);
 
   // Show error dialog when sync fails (but not for transient offline state)
@@ -212,6 +214,7 @@ export default function App() {
         <KanbanBoard
           tasks={tasks}
           tagOptions={tagOptions}
+          collaborators={collaborators}
           pageSize={pageSize}
           onCreateTask={handleCreateTask}
           onUpdateTask={handleUpdateTask}

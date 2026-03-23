@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import type { Task, TaskStatus, TagOption } from '../types';
+import type { Task, TaskStatus, TagOption, Collaborator } from '../types';
 import { STATUSES } from '../types';
 import RichTextEditor from './RichTextEditor';
 import MultiSelectTags from './MultiSelectTags';
@@ -8,12 +8,23 @@ interface Props {
   task: Task | null;       // null → create mode
   initialStatus?: TaskStatus;
   tagOptions: TagOption[];
+  collaborators: Collaborator[];
   onSave: (data: Partial<Task>) => Promise<void>;
   onDelete?: () => Promise<void>;
   onClose: () => void;
 }
 
-export default function TaskModal({ task, initialStatus, tagOptions, onSave, onDelete, onClose }: Props) {
+function parseAssignedTo(value: string | null): string {
+  if (!value) return '';
+  try {
+    const parsed = JSON.parse(value) as { id?: string };
+    return parsed.id ?? '';
+  } catch {
+    return '';
+  }
+}
+
+export default function TaskModal({ task, initialStatus, tagOptions, collaborators, onSave, onDelete, onClose }: Props) {
   const [title, setTitle]       = useState(task?.title ?? '');
   const [desc, setDesc]         = useState(task?.description ?? '');
   const [status, setStatus]     = useState<string>(task?.status ?? initialStatus ?? 'Not Started');
@@ -22,6 +33,7 @@ export default function TaskModal({ task, initialStatus, tagOptions, onSave, onD
   const [selectedTags, setSelectedTags] = useState<string[]>(
     task?.tags ? task.tags.split(',').map((t) => t.trim()).filter(Boolean) : []
   );
+  const [assigneeId, setAssigneeId] = useState(parseAssignedTo(task?.assigned_to ?? null));
   const [saving, setSaving]     = useState(false);
   const [deleting, setDeleting] = useState(false);
   const titleRef = useRef<HTMLInputElement>(null);
@@ -38,6 +50,11 @@ export default function TaskModal({ task, initialStatus, tagOptions, onSave, onD
     if (!title.trim()) return;
     setSaving(true);
     try {
+      const selectedCollab = collaborators.find((c) => c.user_id === assigneeId);
+      const assignedTo = selectedCollab
+        ? JSON.stringify({ id: selectedCollab.user_id, email: selectedCollab.email, name: selectedCollab.name })
+        : null;
+
       await onSave({
         title: title.trim(),
         description: desc.trim(),
@@ -45,6 +62,7 @@ export default function TaskModal({ task, initialStatus, tagOptions, onSave, onD
         priority: priority || null,
         due_date: dueDate || null,
         tags: selectedTags.length > 0 ? selectedTags.join(', ') : null,
+        assigned_to: assignedTo,
       });
       onClose();
     } finally {
@@ -132,6 +150,22 @@ export default function TaskModal({ task, initialStatus, tagOptions, onSave, onD
                 value={dueDate}
                 onChange={(e) => setDueDate(e.target.value)}
               />
+            </div>
+
+            <div className="form-group">
+              <label htmlFor="task-assignee">Assignee</label>
+              <select
+                id="task-assignee"
+                value={assigneeId}
+                onChange={(e) => setAssigneeId(e.target.value)}
+              >
+                <option value="">— Unassigned —</option>
+                {collaborators.map((c) => (
+                  <option key={c.user_id} value={c.user_id}>
+                    {c.name || c.email || c.user_id}
+                  </option>
+                ))}
+              </select>
             </div>
 
             <div className="form-group">

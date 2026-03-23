@@ -1,17 +1,18 @@
-import type { Task, TaskStatus, TagOption } from '../types';
+import type { Task, TaskStatus, TagOption, Collaborator } from '../types';
 import { STATUSES } from '../types';
 import KanbanColumn from './KanbanColumn';
 
 interface Props {
   tasks: Task[];
   tagOptions: TagOption[];
+  collaborators: Collaborator[];
   pageSize: number;
   onCreateTask: (data: Partial<Task>) => Promise<void>;
   onUpdateTask: (id: string, updates: Partial<Task>) => Promise<void>;
   onDeleteTask: (id: string) => Promise<void>;
 }
 
-export default function KanbanBoard({ tasks, tagOptions, pageSize, onCreateTask, onUpdateTask, onDeleteTask }: Props) {
+export default function KanbanBoard({ tasks, tagOptions, collaborators, pageSize, onCreateTask, onUpdateTask, onDeleteTask }: Props) {
   const handleDrop = async (taskId: string, newStatus: TaskStatus) => {
     const task = tasks.find((t) => t.id === taskId);
     if (!task || task.status === newStatus) return;
@@ -38,6 +39,7 @@ export default function KanbanBoard({ tasks, tagOptions, pageSize, onCreateTask,
             status={status}
             tasks={tasksByStatus(status)}
             tagOptions={tagOptions}
+            collaborators={collaborators}
             pageSize={pageSize}
             onCreateTask={(data) => onCreateTask({ ...data, status })}
             onUpdateTask={onUpdateTask}

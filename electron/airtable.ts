@@ -17,6 +17,12 @@ interface MetaTablesResponse {
   tables: MetaTable[];
 }
 
+export interface AirtableCollaborator {
+  id: string;
+  email?: string;
+  name?: string;
+}
+
 export interface AirtableFields {
   'Task Name'?: string;
   Description?: string;
@@ -25,6 +31,9 @@ export interface AirtableFields {
   'Due Date'?: string;
   Tags?: string | string[];
   Position?: number;
+  Assignee?: AirtableCollaborator | null;
+  'Created By'?: AirtableCollaborator | null;
+  [key: string]: unknown;
 }
 
 export interface AirtableRecord {
@@ -210,6 +219,8 @@ export class AirtableClient {
           { name: 'Due Date', type: 'date', options: { dateFormat: { name: 'iso', format: 'YYYY-MM-DD' } } },
           { name: 'Tags', type: 'multipleSelects', options: { choices: [] } },
           { name: 'Position', type: 'number', options: { precision: 1 } },
+          { name: 'Assignee', type: 'singleCollaborator' },
+          { name: 'Created By', type: 'createdBy' },
         ],
       }),
       signal: AbortSignal.timeout(15000),
@@ -260,6 +271,148 @@ export class AirtableClient {
       return field.options.choices.map((c) => ({ name: c.name, color: c.color ?? null }));
     } catch {
       return [];
+    }
+  }
+
+  async ensureAssigneeField(): Promise<void> {
+    const metaUrl = `https://api.airtable.com/v0/meta/bases/${this.baseId}/tables`;
+    const resp = await fetch(metaUrl, {
+      headers: this.headers,
+      signal: AbortSignal.timeout(10000),
+    });
+    if (!resp.ok) return;
+    const data = (await resp.json()) as MetaTablesResponse;
+    const table = data.tables.find((t) => t.name === this.tableName);
+    if (!table || table.fields.some((f) => f.name === 'Assignee')) return;
+
+    await fetch(`${metaUrl}/${table.id}/fields`, {
+      method: 'POST',
+      headers: this.headers,
+      body: JSON.stringify({ name: 'Assignee', type: 'singleCollaborator' }),
+      signal: AbortSignal.timeout(10000),
+    });
+  }
+
+  async ensureCreatedByField(): Promise<void> {
+    const metaUrl = `https://api.airtable.com/v0/meta/bases/${this.baseId}/tables`;
+    const resp = await fetch(metaUrl, {
+      headers: this.headers,
+      signal: AbortSignal.timeout(10000),
+    });
+    if (!resp.ok) return;
+    const data = (await resp.json()) as MetaTablesResponse;
+    const table = data.tables.find((t) => t.name === this.tableName);
+    if (!table || table.fields.some((f) => f.name === 'Created By')) return;
+
+    await fetch(`${metaUrl}/${table.id}/fields`, {
+      method: 'POST',
+      headers: this.headers,
+      body: JSON.stringify({ name: 'Created By', type: 'createdBy' }),
+      signal: AbortSignal.timeout(10000),
+    });
+  }
+
+  // ── Collaborators table operations ──────────────────────────────────
+
+  private collabTableUrl(tableName: string): string {
+    return `${this.baseUrl}/${this.baseId}/${encodeURIComponent(tableName)}`;
+  }
+
+  async fetchCollaboratorsTable(tableName: string): Promise<AirtableRecord[]> {
+    const records: AirtableRecord[] = [];
+    let offset: string | undefined;
+
+    do {
+      const url = new URL(this.collabTableUrl(tableName));
+      if (offset) url.searchParams.set('offset', offset);
+
+      const resp = await fetch(url.toString(), {
+        headers: this.headers,
+        signal: AbortSignal.timeout(30000),
+      });
+
+      if (!resp.ok) {
+        const text = await resp.text();
+        if (resp.status === 404 || text.includes('TABLE_NOT_FOUND') || text.includes('INVALID_PERMISSIONS_OR_MODEL_NOT_FOUND')) {
+          return [];
+        }
+        throw new Error(`Airtable ${resp.status}: ${text}`);
+      }
+
+      const data = (await resp.json()) as ListResponse;
+      records.push(...data.records);
+      offset = data.offset;
+    } while (offset);
+
+    return records;
+  }
+
+  async pushCollaboratorsToTable(
+    tableName: string,
+    collaborators: { userId: string; email: string | null; name: string | null }[],
+  ): Promise<AirtableRecord[]> {
+    const created: AirtableRecord[] = [];
+    for (let i = 0; i < collaborators.length; i += 10) {
+      const batch = collaborators.slice(i, i + 10).map((c) => ({
+        fields: {
+          'User ID': c.userId,
+          Email: c.email ?? '',
+          Name: c.name ?? '',
+        },
+      }));
+      const resp = await fetch(this.collabTableUrl(tableName), {
+        method: 'POST',
+        headers: this.headers,
+        body: JSON.stringify({ records: batch }),
+        signal: AbortSignal.timeout(30000),
+      });
+      if (!resp.ok) {
+        throw new Error(`Airtable ${resp.status}: ${await resp.text()}`);
+      }
+      const data = (await resp.json()) as { records: AirtableRecord[] };
+      created.push(...data.records);
+    }
+    return created;
+  }
+
+  async createCollaboratorsTable(tableName: string): Promise<void> {
+    const url = `https://api.airtable.com/v0/meta/bases/${this.baseId}/tables`;
+    const resp = await fetch(url, {
+      method: 'POST',
+      headers: this.headers,
+      body: JSON.stringify({
+        name: tableName,
+        fields: [
+          { name: 'User ID', type: 'singleLineText' },
+          { name: 'Email', type: 'singleLineText' },
+          { name: 'Name', type: 'singleLineText' },
+        ],
+      }),
+      signal: AbortSignal.timeout(15000),
+    });
+    if (!resp.ok) {
+      const text = await resp.text();
+      if (text.includes('DUPLICATE_TABLE_NAME')) return;
+      throw new Error(`Airtable ${resp.status}: ${text}`);
+    }
+  }
+
+  // ── Invite collaborator to base ─────────────────────────────────────
+
+  async inviteCollaborator(email: string, permissionLevel: string): Promise<void> {
+    const url = `https://api.airtable.com/v0/meta/bases/${this.baseId}/collaborators`;
+    const resp = await fetch(url, {
+      method: 'POST',
+      headers: this.headers,
+      body: JSON.stringify({
+        collaborators: [
+          { user: { email }, permissionLevel },
+        ],
+      }),
+      signal: AbortSignal.timeout(15000),
+    });
+    if (!resp.ok) {
+      throw new Error(`Airtable ${resp.status}: ${await resp.text()}`);
     }
   }
 }

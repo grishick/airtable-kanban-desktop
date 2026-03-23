@@ -55,6 +55,7 @@ export interface Account {
   oauthTokenExpiresAt?: string;   // ISO 8601 string, OAuth only
   baseId: string;
   tableName: string;
+  collaboratorsTableName?: string;
 }
 
 export interface AccountsState {
@@ -65,6 +66,13 @@ export interface AccountsState {
 export interface TagOption {
   name: string;
   color: string | null;
+}
+
+export interface Collaborator {
+  user_id: string;
+  email: string | null;
+  name: string | null;
+  airtable_id: string | null;
 }
 
 // Shape of the API exposed by the preload bridge
@@ -87,6 +95,7 @@ export interface ElectronAPI {
     oauthTokenExpiresAt?: string;
     baseId: string;
     tableName: string;
+    collaboratorsTableName?: string;
   }): Promise<AccountsState>;
   updateAccount(id: string, updates: {
     name?: string;
@@ -96,6 +105,7 @@ export interface ElectronAPI {
     oauthTokenExpiresAt?: string;
     baseId?: string;
     tableName?: string;
+    collaboratorsTableName?: string;
   }): Promise<AccountsState>;
   deleteAccount(id: string): Promise<AccountsState>;
   switchAccount(id: string): Promise<AccountsState>;
@@ -108,9 +118,13 @@ export interface ElectronAPI {
   createTable(): Promise<void>;
   getSyncStatus(): Promise<SyncStatus>;
 
+  getCollaborators(): Promise<Collaborator[]>;
+  inviteCollaborator(email: string, permissionLevel: string): Promise<void>;
+
   onSyncStatus(cb: (status: SyncStatus) => void): () => void;
   onTasksUpdated(cb: (tasks: Task[]) => void): () => void;
   onAccountsUpdated(cb: (state: AccountsState) => void): () => void;
+  onCollaboratorsUpdated(cb: (collaborators: Collaborator[]) => void): () => void;
 
   openExternal(url: string): Promise<void>;
   openLink(url: string): Promise<void>;

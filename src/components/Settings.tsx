@@ -19,6 +19,7 @@ export default function SettingsPage({ onSaved }: Props) {
   const [formToken, setFormToken] = useState('');
   const [formBaseId, setFormBaseId] = useState('');
   const [formTableName, setFormTableName] = useState('Tasks');
+  const [formCollabTableName, setFormCollabTableName] = useState('Collaborators');
 
   const [linkTarget, setLinkTarget] = useState<'browser' | 'app'>('browser');
   const [pageSize, setPageSize] = useState(10);
@@ -41,6 +42,10 @@ export default function SettingsPage({ onSaved }: Props) {
   const [tablesLoading, setTablesLoading] = useState(false);
   const [tablesError, setTablesError] = useState('');
   const [tableMode, setTableMode] = useState<'existing' | 'new'>('new');
+  const [inviteEmail, setInviteEmail] = useState('');
+  const [inviteLevel, setInviteLevel] = useState('editor');
+  const [inviting, setInviting] = useState(false);
+  const [inviteMsg, setInviteMsg] = useState<{ text: string; isError: boolean } | null>(null);
 
   useEffect(() => {
     Promise.all([
@@ -69,6 +74,7 @@ export default function SettingsPage({ onSaved }: Props) {
     setFormToken('');
     setFormBaseId('');
     setFormTableName('Tasks');
+    setFormCollabTableName('Collaborators');
     setEditMode('add');
     setStatusMsg(null);
     setAddAuthTab('pat');
@@ -88,6 +94,7 @@ export default function SettingsPage({ onSaved }: Props) {
     setFormToken(account.token ?? '');
     setFormBaseId(account.baseId);
     setFormTableName(account.tableName);
+    setFormCollabTableName(account.collaboratorsTableName ?? 'Collaborators');
     setEditMode(account.id);
     setStatusMsg(null);
   };
@@ -202,6 +209,7 @@ export default function SettingsPage({ onSaved }: Props) {
             oauthTokenExpiresAt: oauthTokens.expiresAt,
             baseId: formBaseId.trim(),
             tableName: formTableName.trim() || 'Tasks',
+            collaboratorsTableName: formCollabTableName.trim() || 'Collaborators',
           });
           applyAccountsState(result);
           setStatusMsg({ text: 'Account added.', isError: false });
@@ -212,6 +220,7 @@ export default function SettingsPage({ onSaved }: Props) {
             token: formToken.trim(),
             baseId: formBaseId.trim(),
             tableName: formTableName.trim() || 'Tasks',
+            collaboratorsTableName: formCollabTableName.trim() || 'Collaborators',
           });
           applyAccountsState(result);
           setStatusMsg({ text: 'Account added.', isError: false });
@@ -224,6 +233,7 @@ export default function SettingsPage({ onSaved }: Props) {
           ...(isOAuth ? {} : { token: formToken.trim() }),
           baseId: formBaseId.trim(),
           tableName: formTableName.trim() || 'Tasks',
+          collaboratorsTableName: formCollabTableName.trim() || 'Collaborators',
         });
         applyAccountsState(result);
         setStatusMsg({ text: 'Account updated.', isError: false });
@@ -530,6 +540,16 @@ export default function SettingsPage({ onSaved }: Props) {
                     </span>
                   )}
                 </div>
+
+                <div className="form-group">
+                  <label>Collaborators Table Name</label>
+                  <input
+                    type="text"
+                    value={formCollabTableName}
+                    onChange={(e) => setFormCollabTableName(e.target.value)}
+                    placeholder="Collaborators"
+                  />
+                </div>
               </>
             )}
 
@@ -575,6 +595,15 @@ export default function SettingsPage({ onSaved }: Props) {
                     value={formTableName}
                     onChange={(e) => setFormTableName(e.target.value)}
                     placeholder="Tasks"
+                  />
+                </div>
+                <div className="form-group">
+                  <label>Collaborators Table Name</label>
+                  <input
+                    type="text"
+                    value={formCollabTableName}
+                    onChange={(e) => setFormCollabTableName(e.target.value)}
+                    placeholder="Collaborators"
                   />
                 </div>
               </>
@@ -658,6 +687,62 @@ export default function SettingsPage({ onSaved }: Props) {
             {statusMsg && (
               <span className={`settings-status${statusMsg.isError ? ' error' : ''}`}>
                 {statusMsg.text}
+              </span>
+            )}
+          </div>
+        </form>
+
+        <hr className="settings-divider" />
+
+        {/* ── Invite Collaborator ── */}
+        <h2>Invite Collaborator</h2>
+        <form className="settings-form" onSubmit={async (e) => {
+          e.preventDefault();
+          if (!inviteEmail.trim()) return;
+          setInviting(true);
+          setInviteMsg(null);
+          try {
+            await window.electronAPI.inviteCollaborator(inviteEmail.trim(), inviteLevel);
+            setInviteMsg({ text: `Invited ${inviteEmail.trim()} as ${inviteLevel}.`, isError: false });
+            setInviteEmail('');
+          } catch (err) {
+            setInviteMsg({ text: String(err), isError: true });
+          } finally {
+            setInviting(false);
+          }
+        }}>
+          <div className="form-group">
+            <label htmlFor="invite-email">Email Address</label>
+            <input
+              id="invite-email"
+              type="email"
+              value={inviteEmail}
+              onChange={(e) => setInviteEmail(e.target.value)}
+              placeholder="collaborator@example.com"
+              required
+            />
+          </div>
+          <div className="form-group">
+            <label htmlFor="invite-level">Permission Level</label>
+            <select
+              id="invite-level"
+              value={inviteLevel}
+              onChange={(e) => setInviteLevel(e.target.value)}
+            >
+              <option value="owner">Owner</option>
+              <option value="creator">Creator</option>
+              <option value="editor">Editor</option>
+              <option value="commenter">Commenter</option>
+              <option value="read">Read only</option>
+            </select>
+          </div>
+          <div className="settings-actions">
+            <button type="submit" className="btn btn-primary" disabled={inviting || !hasActiveAccount}>
+              {inviting ? 'Inviting…' : 'Invite'}
+            </button>
+            {inviteMsg && (
+              <span className={`settings-status${inviteMsg.isError ? ' error' : ''}`}>
+                {inviteMsg.text}
               </span>
             )}
           </div>

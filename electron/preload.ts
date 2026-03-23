@@ -40,6 +40,14 @@ export interface Account {
   oauthTokenExpiresAt?: string;
   baseId: string;
   tableName: string;
+  collaboratorsTableName?: string;
+}
+
+export interface Collaborator {
+  user_id: string;
+  email: string | null;
+  name: string | null;
+  airtable_id: string | null;
 }
 
 export interface AccountsState {
@@ -81,6 +89,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     oauthTokenExpiresAt?: string;
     baseId: string;
     tableName: string;
+    collaboratorsTableName?: string;
   }): Promise<AccountsState> =>
     ipcRenderer.invoke('accounts:add', data),
   updateAccount: (id: string, updates: {
@@ -91,6 +100,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     oauthTokenExpiresAt?: string;
     baseId?: string;
     tableName?: string;
+    collaboratorsTableName?: string;
   }): Promise<AccountsState> =>
     ipcRenderer.invoke('accounts:update', id, updates),
   deleteAccount: (id: string): Promise<AccountsState> =>
@@ -116,6 +126,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getTagOptions: (): Promise<TagOption[]> =>
     ipcRenderer.invoke('tags:getOptions'),
 
+  // Collaborators
+  getCollaborators: (): Promise<Collaborator[]> =>
+    ipcRenderer.invoke('collaborators:get'),
+  inviteCollaborator: (email: string, permissionLevel: string): Promise<void> =>
+    ipcRenderer.invoke('collaborators:invite', email, permissionLevel),
+
   // Error dialog
   showError: (title: string, detail: string): Promise<void> =>
     ipcRenderer.invoke('error:show', title, detail),
@@ -135,6 +151,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
     const handler = (_event: Electron.IpcRendererEvent, state: AccountsState) => cb(state);
     ipcRenderer.on('accounts:updated', handler);
     return () => ipcRenderer.removeListener('accounts:updated', handler);
+  },
+  onCollaboratorsUpdated: (cb: (collaborators: Collaborator[]) => void): (() => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, collaborators: Collaborator[]) => cb(collaborators);
+    ipcRenderer.on('collaborators:updated', handler);
+    return () => ipcRenderer.removeListener('collaborators:updated', handler);
   },
 
   // OAuth

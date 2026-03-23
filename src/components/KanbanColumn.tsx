@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import type { Task, TaskStatus, TagOption } from '../types';
+import type { Task, TaskStatus, TagOption, Collaborator } from '../types';
 import TaskCard from './TaskCard';
 import TaskModal from './TaskModal';
 
@@ -7,6 +7,7 @@ interface Props {
   status: TaskStatus;
   tasks: Task[];
   tagOptions: TagOption[];
+  collaborators: Collaborator[];
   pageSize: number;
   onCreateTask: (data: Partial<Task>) => Promise<void>;
   onUpdateTask: (id: string, updates: Partial<Task>) => Promise<void>;
@@ -39,6 +40,7 @@ export default function KanbanColumn({
   status,
   tasks,
   tagOptions,
+  collaborators,
   pageSize,
   onCreateTask,
   onUpdateTask,
@@ -206,6 +208,7 @@ export default function KanbanColumn({
           task={null}
           initialStatus={status}
           tagOptions={tagOptions}
+          collaborators={collaborators}
           onSave={onCreateTask}
           onClose={() => setCreating(false)}
         />
@@ -215,6 +218,7 @@ export default function KanbanColumn({
         <TaskModal
           task={editingTask}
           tagOptions={tagOptions}
+          collaborators={collaborators}
           onSave={(updates) => onUpdateTask(editingTask.id, updates)}
           onDelete={() => onDeleteTask(editingTask.id)}
           onClose={() => setEditingTask(null)}

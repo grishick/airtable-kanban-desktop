@@ -53,6 +53,13 @@ export interface TagOption {
   color: string | null;
 }
 
+export interface Collaborator {
+  user_id: string;
+  email: string | null;
+  name: string | null;
+  airtable_id: string | null;
+}
+
 function migrate(): void {
   db.exec(`
     CREATE TABLE IF NOT EXISTS settings (
@@ -80,6 +87,13 @@ function migrate(): void {
       updated_at  TEXT NOT NULL,
       synced_at   TEXT,
       is_deleted  INTEGER NOT NULL DEFAULT 0
+    );
+
+    CREATE TABLE IF NOT EXISTS collaborators (
+      user_id     TEXT PRIMARY KEY,
+      email       TEXT,
+      name        TEXT,
+      airtable_id TEXT UNIQUE
     );
 
     CREATE TABLE IF NOT EXISTS pending_ops (
@@ -241,6 +255,34 @@ export function replaceTagOptions(options: TagOption[]): void {
     const stmt = db.prepare('INSERT INTO tag_options (name, color) VALUES (?, ?)');
     for (const opt of options) {
       stmt.run(opt.name, opt.color);
+    }
+  });
+  tx();
+}
+
+// ── Collaborators ──────────────────────────────────────────────────────
+
+export function getCollaborators(): Collaborator[] {
+  return db.prepare('SELECT user_id, email, name, airtable_id FROM collaborators ORDER BY name ASC').all() as Collaborator[];
+}
+
+export function upsertCollaborator(c: Collaborator): void {
+  db.prepare(`
+    INSERT INTO collaborators (user_id, email, name, airtable_id)
+    VALUES (?, ?, ?, ?)
+    ON CONFLICT(user_id) DO UPDATE SET
+      email = COALESCE(excluded.email, collaborators.email),
+      name = COALESCE(excluded.name, collaborators.name),
+      airtable_id = COALESCE(excluded.airtable_id, collaborators.airtable_id)
+  `).run(c.user_id, c.email, c.name, c.airtable_id);
+}
+
+export function replaceCollaborators(collaborators: Collaborator[]): void {
+  const tx = db.transaction(() => {
+    db.prepare('DELETE FROM collaborators').run();
+    const stmt = db.prepare('INSERT INTO collaborators (user_id, email, name, airtable_id) VALUES (?, ?, ?, ?)');
+    for (const c of collaborators) {
+      stmt.run(c.user_id, c.email, c.name, c.airtable_id);
     }
   });
   tx();

@@ -6,6 +6,7 @@ import { SyncEngine } from './sync';
 import {
   loadAccountsFile,
   getActiveAccount,
+  getActiveToken,
   dbPathForAccount,
   addAccount,
   updateAccount,
@@ -13,7 +14,7 @@ import {
   setActiveAccount,
   AccountsFile,
 } from './accounts';
-import { fetchBaseName, fetchBases, fetchTables } from './airtable';
+import { AirtableClient, fetchBaseName, fetchBases, fetchTables } from './airtable';
 import { startOAuthFlow } from './oauth';
 
 const isDev = process.env.NODE_ENV === 'development';
@@ -149,6 +150,7 @@ function setupIPC(win: BrowserWindow): void {
     oauthTokenExpiresAt?: string;
     baseId: string;
     tableName: string;
+    collaboratorsTableName?: string;
   }) => {
     const isFirstAccount = getActiveAccount() === null;
 
@@ -173,6 +175,7 @@ function setupIPC(win: BrowserWindow): void {
       oauthTokenExpiresAt: data.oauthTokenExpiresAt,
       baseId: data.baseId,
       tableName: data.tableName || 'Tasks',
+      collaboratorsTableName: data.collaboratorsTableName || 'Collaborators',
     });
 
     if (isFirstAccount) {
@@ -195,13 +198,14 @@ function setupIPC(win: BrowserWindow): void {
     oauthTokenExpiresAt?: string;
     baseId?: string;
     tableName?: string;
+    collaboratorsTableName?: string;
   }) => {
     const result = updateAccount(id, updates);
     if (!result) throw new Error(`Account not found: ${id}`);
 
     // Reinit sync if active account credentials changed
     const { activeId } = result.file;
-    if (id === activeId && (updates.token || updates.oauthAccessToken || updates.baseId || updates.tableName)) {
+    if (id === activeId && (updates.token || updates.oauthAccessToken || updates.baseId || updates.tableName || updates.collaboratorsTableName)) {
       syncEngine?.reinit();
       if (syncEngine) void syncEngine.sync();
     }
@@ -301,6 +305,21 @@ function setupIPC(win: BrowserWindow): void {
   // ── Tag Options ────────────────────────────────────────────────────────
   ipcMain.handle('tags:getOptions', () => {
     return db.getTagOptions();
+  });
+
+  // ── Collaborators ─────────────────────────────────────────────────────
+  ipcMain.handle('collaborators:get', () => {
+    return db.getCollaborators();
+  });
+
+  ipcMain.handle('collaborators:invite', async (_event, email: string, permissionLevel: string) => {
+    const account = getActiveAccount();
+    const token = account ? getActiveToken(account) : '';
+    const baseId = account?.baseId ?? '';
+    if (!token || !baseId) throw new Error('Airtable not configured');
+
+    const client = new AirtableClient(token, baseId, account?.tableName ?? 'Tasks');
+    await client.inviteCollaborator(email, permissionLevel);
   });
 
   // ── Error dialog ───────────────────────────────────────────────────────

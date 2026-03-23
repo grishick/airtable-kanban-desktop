@@ -1,3 +1,4 @@
+import { useMemo } from 'react';
 import type { Task, TagOption } from '../types';
 import { tagColorStyle } from '../tagColors';
 import RichTextContent from './RichTextContent';
@@ -11,7 +12,28 @@ interface Props {
   onToggleCheckbox?: (nextDescription: string) => Promise<void>;
 }
 
+function getAssigneeName(assignedTo: string | null): string | null {
+  if (!assignedTo) return null;
+  try {
+    const parsed = JSON.parse(assignedTo) as { name?: string; email?: string };
+    return parsed.name || parsed.email || null;
+  } catch {
+    return null;
+  }
+}
+
+function getInitials(name: string): string {
+  return name
+    .split(/\s+/)
+    .map((w) => w[0])
+    .filter(Boolean)
+    .slice(0, 2)
+    .join('')
+    .toUpperCase();
+}
+
 export default function TaskCard({ task, tagOptions, onClick, onDragStart, onDragEnd, onToggleCheckbox }: Props) {
+  const assigneeName = useMemo(() => getAssigneeName(task.assigned_to), [task.assigned_to]);
   const isOverdue =
     task.due_date && new Date(task.due_date) < new Date(new Date().toDateString());
 
@@ -68,6 +90,12 @@ export default function TaskCard({ task, tagOptions, onClick, onDragStart, onDra
         })}
         {tags.length > 2 && (
           <span className="tag-badge">+{tags.length - 2}</span>
+        )}
+        {assigneeName && (
+          <span className="assignee-badge" title={assigneeName}>
+            <span className="assignee-avatar">{getInitials(assigneeName)}</span>
+            <span className="assignee-name">{assigneeName.split(/\s+/)[0]}</span>
+          </span>
         )}
       </div>
     </div>

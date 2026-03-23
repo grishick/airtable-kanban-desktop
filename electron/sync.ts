@@ -1,6 +1,6 @@
 import { BrowserWindow, powerSaveBlocker } from 'electron';
 import * as db from './db';
-import { AirtableClient, AirtableFields, AirtableRecord } from './airtable';
+import { AirtableClient, AirtableCollaborator, AirtableFields, AirtableRecord } from './airtable';
 import { getActiveAccount, getActiveToken, refreshOAuthTokenIfNeeded } from './accounts';
 
 export type SyncState = 'idle' | 'syncing' | 'error' | 'offline' | 'unconfigured' | 'table_not_found';
@@ -23,6 +23,9 @@ export class SyncEngine {
   private timer: ReturnType<typeof setInterval> | null = null;
   private startupTimer: ReturnType<typeof setTimeout> | null = null;
   private positionFieldEnsured = false;
+  private assigneeFieldEnsured = false;
+  private createdByFieldEnsured = false;
+  private harvestedCollaborators = new Map<string, AirtableCollaborator>();
   private powerSaveId: number | null = null;
   private intervalMs = DEFAULT_SYNC_INTERVAL_MS;
 
@@ -45,6 +48,8 @@ export class SyncEngine {
       this.state = 'unconfigured';
     }
     this.positionFieldEnsured = false;
+    this.assigneeFieldEnsured = false;
+    this.createdByFieldEnsured = false;
     this.broadcastStatus();
   }
 
@@ -105,6 +110,10 @@ export class SyncEngine {
     this.broadcast('tasks:updated', db.getAllTasks());
   }
 
+  private broadcastCollaborators(): void {
+    this.broadcast('collaborators:updated', db.getCollaborators());
+  }
+
   /** Create the Airtable table and immediately run a sync. */
   async createTable(): Promise<void> {
     if (!this.client) throw new Error('Airtable not configured');
@@ -144,9 +153,13 @@ export class SyncEngine {
 
     try {
       await this.ensurePositionField();
+      await this.ensureAssigneeField();
+      await this.ensureCreatedByField();
+      this.harvestedCollaborators.clear();
       await this.pushPendingOps();
       await this.pullFromAirtable();
       await this.updateTagOptions();
+      await this.syncCollaborators();
       this.state = 'idle';
       this.lastSync = new Date().toISOString();
       this.lastError = null;
@@ -162,6 +175,7 @@ export class SyncEngine {
 
     this.broadcastStatus();
     this.broadcastTasks();
+    this.broadcastCollaborators();
   }
 
   // ── Schema migration ──────────────────────────────────────────────────
@@ -173,6 +187,26 @@ export class SyncEngine {
       this.positionFieldEnsured = true;
     } catch (err) {
       console.warn('[sync] failed to ensure Position field:', err);
+    }
+  }
+
+  private async ensureAssigneeField(): Promise<void> {
+    if (this.assigneeFieldEnsured || !this.client) return;
+    try {
+      await this.client.ensureAssigneeField();
+      this.assigneeFieldEnsured = true;
+    } catch (err) {
+      console.warn('[sync] failed to ensure Assignee field:', err);
+    }
+  }
+
+  private async ensureCreatedByField(): Promise<void> {
+    if (this.createdByFieldEnsured || !this.client) return;
+    try {
+      await this.client.ensureCreatedByField();
+      this.createdByFieldEnsured = true;
+    } catch (err) {
+      console.warn('[sync] failed to ensure Created By field:', err);
     }
   }
 
@@ -257,6 +291,82 @@ export class SyncEngine {
     }
   }
 
+  // ── Collaborators ──────────────────────────────────────────────────────
+
+  private harvestCollaborator(c: AirtableCollaborator | null | undefined): void {
+    if (!c?.id) return;
+    this.harvestedCollaborators.set(c.id, c);
+  }
+
+  private async syncCollaborators(): Promise<void> {
+    if (!this.client) return;
+
+    const account = getActiveAccount();
+    const collabTableName = account?.collaboratorsTableName || 'Collaborators';
+
+    const merged = new Map<string, db.Collaborator>();
+    for (const [id, c] of this.harvestedCollaborators) {
+      merged.set(id, {
+        user_id: id,
+        email: c.email ?? null,
+        name: c.name ?? null,
+        airtable_id: null,
+      });
+    }
+
+    try {
+      const remoteRecords = await this.client.fetchCollaboratorsTable(collabTableName);
+      for (const rec of remoteRecords) {
+        const userId = rec.fields['User ID'] as string | undefined;
+        if (!userId) continue;
+        const existing = merged.get(userId);
+        merged.set(userId, {
+          user_id: userId,
+          email: (rec.fields.Email as string) || existing?.email || null,
+          name: (rec.fields.Name as string) || existing?.name || null,
+          airtable_id: rec.id,
+        });
+      }
+
+      const toPush = [...merged.values()].filter((c) => !c.airtable_id);
+      if (toPush.length > 0) {
+        try {
+          const created = await this.client.pushCollaboratorsToTable(
+            collabTableName,
+            toPush.map((c) => ({ userId: c.user_id, email: c.email, name: c.name })),
+          );
+          for (let i = 0; i < toPush.length && i < created.length; i++) {
+            toPush[i].airtable_id = created[i].id;
+          }
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          if (msg.includes('TABLE_NOT_FOUND') || msg.includes('INVALID_PERMISSIONS_OR_MODEL_NOT_FOUND') || msg.includes('404')) {
+            try {
+              await this.client.createCollaboratorsTable(collabTableName);
+              const created = await this.client.pushCollaboratorsToTable(
+                collabTableName,
+                toPush.map((c) => ({ userId: c.user_id, email: c.email, name: c.name })),
+              );
+              for (let i = 0; i < toPush.length && i < created.length; i++) {
+                toPush[i].airtable_id = created[i].id;
+              }
+            } catch (createErr) {
+              console.warn('[sync] failed to create collaborators table:', createErr);
+            }
+          } else {
+            console.warn('[sync] failed to push collaborators:', err);
+          }
+        }
+      }
+    } catch (err) {
+      console.warn('[sync] failed to sync collaborators table:', err);
+    }
+
+    if (merged.size > 0) {
+      db.replaceCollaborators([...merged.values()]);
+    }
+  }
+
   // ── Pull ───────────────────────────────────────────────────────────────
 
   private async pullFromAirtable(): Promise<void> {
@@ -265,6 +375,9 @@ export class SyncEngine {
     const needsPositionBackfill: { id: string; fields: AirtableFields }[] = [];
 
     for (const record of records) {
+      this.harvestCollaborator(record.fields['Created By'] as AirtableCollaborator | undefined);
+      this.harvestCollaborator(record.fields.Assignee as AirtableCollaborator | undefined);
+
       const existing = db.getTaskByAirtableId(record.id);
       const hasRemotePosition = typeof record.fields.Position === 'number';
 
@@ -315,6 +428,14 @@ function taskToFields(task: db.Task): AirtableFields {
   if (task.priority) fields.Priority = task.priority;
   if (task.due_date) fields['Due Date'] = task.due_date;
   if (task.tags) fields.Tags = task.tags.split(',').map((t) => t.trim()).filter(Boolean);
+  if (task.assigned_to) {
+    try {
+      const parsed = JSON.parse(task.assigned_to) as AirtableCollaborator;
+      if (parsed?.id) fields.Assignee = { id: parsed.id };
+    } catch { /* ignore invalid JSON */ }
+  } else {
+    fields.Assignee = null;
+  }
   return fields;
 }
 
@@ -324,13 +445,19 @@ function airtableToTaskFields(record: AirtableRecord): Partial<db.Task> {
     ? f.Tags.join(', ')
     : (f.Tags as string | undefined) ?? null;
 
+  const assignee = f.Assignee as AirtableCollaborator | null | undefined;
+  const assignedTo = assignee?.id
+    ? JSON.stringify({ id: assignee.id, email: assignee.email ?? null, name: assignee.name ?? null })
+    : null;
+
   const fields: Partial<db.Task> = {
-    title: f['Task Name'] ?? 'Untitled',
-    description: f.Description ?? '',
-    status: f.Status ?? 'Not Started',
-    priority: f.Priority ?? null,
-    due_date: f['Due Date'] ?? null,
+    title: (f['Task Name'] as string | undefined) ?? 'Untitled',
+    description: (f.Description as string | undefined) ?? '',
+    status: (f.Status as string | undefined) ?? 'Not Started',
+    priority: (f.Priority as string | undefined) ?? null,
+    due_date: (f['Due Date'] as string | undefined) ?? null,
     tags,
+    assigned_to: assignedTo,
   };
   if (typeof f.Position === 'number') fields.position = f.Position;
   return fields;

@@ -13,6 +13,7 @@ export interface Account {
   oauthTokenExpiresAt?: string;
   baseId: string;
   tableName: string;
+  collaboratorsTableName?: string;
 }
 
 export function getActiveToken(account: Account): string {
