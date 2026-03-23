@@ -412,7 +412,18 @@ export class AirtableClient {
       signal: AbortSignal.timeout(15000),
     });
     if (!resp.ok) {
-      throw new Error(`Airtable ${resp.status}: ${await resp.text()}`);
+      const text = await resp.text();
+      if (resp.status === 422 || text.includes('INVALID_REQUEST_UNKNOWN')) {
+        throw new Error(
+          'Inviting collaborators via API requires an Airtable Enterprise plan. ' +
+          'On other plans, use the share button in the Airtable web UI to invite collaborators.',
+        );
+      }
+      throw new Error(`Airtable ${resp.status}: ${text}`);
     }
+  }
+
+  getBaseShareUrl(): string {
+    return `https://airtable.com/${this.baseId}`;
   }
 }

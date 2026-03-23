@@ -696,6 +696,11 @@ export default function SettingsPage({ onSaved }: Props) {
 
         {/* ── Invite Collaborator ── */}
         <h2>Invite Collaborator</h2>
+        <p style={{ color: 'var(--text-secondary)', fontSize: 13, marginBottom: 12 }}>
+          Invite users to your Airtable base so they can be assigned to tasks.
+          API invitations require an <strong>Enterprise plan</strong>.
+          On other plans, use the Airtable web UI.
+        </p>
         <form className="settings-form" onSubmit={async (e) => {
           e.preventDefault();
           if (!inviteEmail.trim()) return;
@@ -706,7 +711,8 @@ export default function SettingsPage({ onSaved }: Props) {
             setInviteMsg({ text: `Invited ${inviteEmail.trim()} as ${inviteLevel}.`, isError: false });
             setInviteEmail('');
           } catch (err) {
-            setInviteMsg({ text: String(err), isError: true });
+            const msg = err instanceof Error ? err.message : String(err);
+            setInviteMsg({ text: msg, isError: true });
           } finally {
             setInviting(false);
           }
@@ -738,14 +744,27 @@ export default function SettingsPage({ onSaved }: Props) {
           </div>
           <div className="settings-actions">
             <button type="submit" className="btn btn-primary" disabled={inviting || !hasActiveAccount}>
-              {inviting ? 'Inviting…' : 'Invite'}
+              {inviting ? 'Inviting…' : 'Invite via API'}
             </button>
-            {inviteMsg && (
-              <span className={`settings-status${inviteMsg.isError ? ' error' : ''}`}>
-                {inviteMsg.text}
-              </span>
-            )}
+            <button
+              type="button"
+              className="btn btn-secondary"
+              disabled={!hasActiveAccount}
+              onClick={() => {
+                const account = accounts.find((a) => a.id === activeId);
+                if (account?.baseId) {
+                  window.electronAPI.openExternal(`https://airtable.com/${account.baseId}`);
+                }
+              }}
+            >
+              Open in Airtable
+            </button>
           </div>
+          {inviteMsg && (
+            <span className={`settings-status${inviteMsg.isError ? ' error' : ''}`}>
+              {inviteMsg.text}
+            </span>
+          )}
         </form>
 
         {!(addAuthTab === 'oauth' && oauthTokens && editMode === 'add') && (
