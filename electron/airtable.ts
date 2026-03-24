@@ -294,63 +294,6 @@ export class AirtableClient {
     }
   }
 
-  /**
-   * Update the Status singleSelect field choices in Airtable.
-   * The Airtable API requires ALL existing choices to be included in the
-   * PATCH request. This method fetches the current choices, merges
-   * modifications (preserving original choice objects exactly), and sends
-   * the complete list.
-   */
-  async updateStatusFieldChoices(modifications: Array<{ id?: string; name: string }>): Promise<void> {
-    const metaUrl = `https://api.airtable.com/v0/meta/bases/${this.baseId}/tables`;
-    const resp = await fetch(metaUrl, {
-      headers: this.headers,
-      signal: AbortSignal.timeout(10000),
-    });
-    if (!resp.ok) throw new Error(`Failed to fetch table metadata: ${resp.status}`);
-    const data = (await resp.json()) as MetaTablesResponse;
-    const table = data.tables.find((t) => t.name === this.tableName);
-    if (!table) throw new Error('Table not found in Airtable');
-    const field = table.fields.find((f) => f.name === 'Status');
-    if (!field) throw new Error('Status field not found in Airtable table');
-
-    const existing: Array<Record<string, unknown>> = field.options?.choices ?? [];
-    const modById = new Map(modifications.filter((m) => m.id).map((m) => [m.id!, m]));
-    const newChoices = modifications.filter((m) => !m.id);
-
-    // Preserve each existing choice object as-is, only changing name if renamed
-    const merged: Array<Record<string, unknown>> = existing.map((c) => {
-      const choiceId = c.id as string | undefined;
-      const mod = choiceId ? modById.get(choiceId) : undefined;
-      return mod ? { ...c, name: mod.name } : { ...c };
-    });
-    for (const nc of newChoices) {
-      merged.push({ name: nc.name });
-    }
-
-    const body = JSON.stringify({ options: { choices: merged } });
-    console.log('[airtable] PATCH field choices URL:', `${metaUrl}/${table.id}/fields/${field.id}`);
-    console.log('[airtable] PATCH field choices body:', body);
-
-    const updateResp = await fetch(`${metaUrl}/${table.id}/fields/${field.id}`, {
-      method: 'PATCH',
-      headers: this.headers,
-      body,
-      signal: AbortSignal.timeout(10000),
-    });
-    if (!updateResp.ok) {
-      const text = await updateResp.text();
-      if (updateResp.status === 403) {
-        throw new Error(
-          'Airtable 403: Cannot update Status field — your token is missing the ' +
-          '"schema.bases:write" scope. Go to airtable.com → Account → Developer hub → ' +
-          'edit your token and add that scope.',
-        );
-      }
-      throw new Error(`Airtable ${updateResp.status}: ${text}\n\nRequest body sent:\n${body}`);
-    }
-  }
-
   async ensureAssigneeField(): Promise<void> {
     const metaUrl = `https://api.airtable.com/v0/meta/bases/${this.baseId}/tables`;
     const resp = await fetch(metaUrl, {
