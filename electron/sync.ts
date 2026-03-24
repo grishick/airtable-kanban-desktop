@@ -305,43 +305,56 @@ export class SyncEngine {
       if (remoteChoices.length === 0) return;
 
       const local = db.getStatusOptions();
-      const localByChoiceId = new Map<string, db.StatusOption>();
       const localByName = new Map<string, db.StatusOption>();
+      const localByChoiceId = new Map<string, db.StatusOption>();
       for (const opt of local) {
-        if (opt.airtable_choice_id) localByChoiceId.set(opt.airtable_choice_id, opt);
         localByName.set(opt.name, opt);
+        if (opt.airtable_choice_id) localByChoiceId.set(opt.airtable_choice_id, opt);
       }
 
       const result: db.StatusOption[] = [];
-      const usedLocalNames = new Set<string>();
+      const matchedLocalNames = new Set<string>();
+      const handledRemoteNames = new Set<string>();
       let maxPos = local.reduce((m, o) => Math.max(m, o.position), -1000);
       const usedColors = new Set(local.map((o) => o.color).filter(Boolean));
 
+      // Pass 1: match remote choices by NAME (highest priority — handles
+      // local renames where the choice ID still points to the old Airtable
+      // choice but tasks already use the new name).
       for (const rc of remoteChoices) {
+        const byName = localByName.get(rc.name);
+        if (byName) {
+          matchedLocalNames.add(rc.name);
+          handledRemoteNames.add(rc.name);
+          result.push({
+            name: rc.name,
+            color: byName.color,
+            position: byName.position,
+            airtable_choice_id: rc.id ?? byName.airtable_choice_id,
+          });
+        }
+      }
+
+      // Pass 2: for remote choices not matched by name, try matching by
+      // choice ID. This detects upstream renames made in Airtable.
+      for (const rc of remoteChoices) {
+        if (handledRemoteNames.has(rc.name)) continue;
+
         const byId = rc.id ? localByChoiceId.get(rc.id) : undefined;
-        if (byId) {
-          usedLocalNames.add(byId.name);
-          if (byId.name !== rc.name) {
-            db.bulkRenameTaskStatus(byId.name, rc.name);
-          }
+        if (byId && !matchedLocalNames.has(byId.name)) {
+          // ID match with different name — upstream rename from Airtable
+          matchedLocalNames.add(byId.name);
+          handledRemoteNames.add(rc.name);
+          db.bulkRenameTaskStatus(byId.name, rc.name);
           result.push({
             name: rc.name,
             color: byId.color,
             position: byId.position,
             airtable_choice_id: rc.id ?? null,
           });
-        } else if (localByName.has(rc.name)) {
-          const byName = localByName.get(rc.name)!;
-          usedLocalNames.add(rc.name);
-          result.push({
-            name: rc.name,
-            color: byName.color,
-            position: byName.position,
-            airtable_choice_id: rc.id ?? null,
-          });
-        } else {
-          // Only add an Airtable-only choice if tasks actually use it.
-          // Stale choices (e.g. left over after a rename) are skipped.
+        } else if (!byId) {
+          handledRemoteNames.add(rc.name);
+          // Completely new Airtable choice — only add if tasks use it
           if (db.getTaskCountByStatus(rc.name) === 0) continue;
           maxPos += 1000;
           const color = db.STATUS_COLOR_PALETTE.find((c) => !usedColors.has(c))
@@ -354,10 +367,13 @@ export class SyncEngine {
             airtable_choice_id: rc.id ?? null,
           });
         }
+        // If byId matched but its name was already claimed in pass 1,
+        // this is a stale Airtable choice left over from a local rename — skip it.
       }
 
+      // Keep local-only statuses (not in Airtable, e.g. newly added locally)
       for (const opt of local) {
-        if (!usedLocalNames.has(opt.name)) {
+        if (!matchedLocalNames.has(opt.name)) {
           result.push(opt);
         }
       }
