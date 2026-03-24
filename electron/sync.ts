@@ -159,6 +159,7 @@ export class SyncEngine {
       await this.pushPendingOps();
       await this.pullFromAirtable();
       await this.updateTagOptions();
+      await this.updateStatusOptions();
       await this.syncCollaborators();
       this.state = 'idle';
       this.lastSync = new Date().toISOString();
@@ -175,6 +176,7 @@ export class SyncEngine {
 
     this.broadcastStatus();
     this.broadcastTasks();
+    this.broadcastStatusOptions();
     this.broadcastCollaborators();
   }
 
@@ -288,6 +290,78 @@ export class SyncEngine {
     } catch (err) {
       // Non-fatal: tag options are a convenience, don't abort sync
       console.warn('[sync] failed to fetch tag options:', err);
+    }
+  }
+
+  // ── Status Options ─────────────────────────────────────────────────────
+
+  private broadcastStatusOptions(): void {
+    this.broadcast('statuses:updated', db.getStatusOptions());
+  }
+
+  private async updateStatusOptions(): Promise<void> {
+    try {
+      const remoteChoices = await this.client!.fetchStatusOptions();
+      if (remoteChoices.length === 0) return;
+
+      const local = db.getStatusOptions();
+      const localByChoiceId = new Map<string, db.StatusOption>();
+      const localByName = new Map<string, db.StatusOption>();
+      for (const opt of local) {
+        if (opt.airtable_choice_id) localByChoiceId.set(opt.airtable_choice_id, opt);
+        localByName.set(opt.name, opt);
+      }
+
+      const result: db.StatusOption[] = [];
+      const usedLocalNames = new Set<string>();
+      let maxPos = local.reduce((m, o) => Math.max(m, o.position), -1000);
+      const usedColors = new Set(local.map((o) => o.color).filter(Boolean));
+
+      for (const rc of remoteChoices) {
+        const byId = rc.id ? localByChoiceId.get(rc.id) : undefined;
+        if (byId) {
+          usedLocalNames.add(byId.name);
+          if (byId.name !== rc.name) {
+            db.bulkRenameTaskStatus(byId.name, rc.name);
+          }
+          result.push({
+            name: rc.name,
+            color: byId.color,
+            position: byId.position,
+            airtable_choice_id: rc.id ?? null,
+          });
+        } else if (localByName.has(rc.name)) {
+          const byName = localByName.get(rc.name)!;
+          usedLocalNames.add(rc.name);
+          result.push({
+            name: rc.name,
+            color: byName.color,
+            position: byName.position,
+            airtable_choice_id: rc.id ?? null,
+          });
+        } else {
+          maxPos += 1000;
+          const color = db.STATUS_COLOR_PALETTE.find((c) => !usedColors.has(c))
+            ?? db.STATUS_COLOR_PALETTE[result.length % db.STATUS_COLOR_PALETTE.length];
+          usedColors.add(color);
+          result.push({
+            name: rc.name,
+            color,
+            position: maxPos,
+            airtable_choice_id: rc.id ?? null,
+          });
+        }
+      }
+
+      for (const opt of local) {
+        if (!usedLocalNames.has(opt.name)) {
+          result.push(opt);
+        }
+      }
+
+      db.replaceStatusOptions(result);
+    } catch (err) {
+      console.warn('[sync] failed to update status options:', err);
     }
   }
 

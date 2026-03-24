@@ -269,8 +269,177 @@ a {
 
 .column.collapsed {
   flex: 0 0 auto;
-  width: 180px;
-  min-width: 180px;
+  width: 48px;
+  min-width: 48px;
+}
+
+.column.collapsed .column-header {
+  flex-direction: column;
+  align-items: center;
+  padding: 8px 4px;
+  gap: 8px;
+  height: 100%;
+}
+
+.column.collapsed .column-title {
+  writing-mode: vertical-rl;
+  text-orientation: mixed;
+  white-space: nowrap;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+
+.column.collapsed .column-count {
+  min-width: auto;
+  padding: 2px 4px;
+  font-size: 11px;
+}
+
+.column.collapsed .column-collapse-btn {
+  order: -1;
+}
+
+/* ── Column menu ──────────────────────────────────────────────────────── */
+.column-menu-container {
+  position: relative;
+  flex-shrink: 0;
+}
+
+.column-menu-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--text-muted);
+  font-size: 16px;
+  font-weight: bold;
+  padding: 2px 4px;
+  border-radius: 3px;
+  line-height: 1;
+  transition: background 0.15s, color 0.15s;
+}
+
+.column-menu-btn:hover {
+  background: rgba(9, 30, 66, 0.08);
+  color: var(--text-secondary);
+}
+
+.column-menu-dropdown {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  z-index: 100;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+  min-width: 140px;
+  padding: 4px 0;
+}
+
+.column-menu-dropdown button {
+  display: block;
+  width: 100%;
+  padding: 8px 12px;
+  background: none;
+  border: none;
+  text-align: left;
+  font-size: 13px;
+  color: var(--text);
+  cursor: pointer;
+  transition: background 0.1s;
+}
+
+.column-menu-dropdown button:hover {
+  background: rgba(9, 30, 66, 0.06);
+}
+
+.column-menu-dropdown button.danger {
+  color: var(--danger);
+}
+
+.column-menu-dropdown button.danger:hover {
+  background: rgba(255, 86, 48, 0.08);
+}
+
+/* ── Column title inline edit ─────────────────────────────────────────── */
+.column-title-input {
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-secondary);
+  flex: 1;
+  min-width: 0;
+  border: 1px solid var(--accent);
+  border-radius: 3px;
+  padding: 2px 4px;
+  background: var(--surface);
+  outline: none;
+}
+
+/* ── Add column ───────────────────────────────────────────────────────── */
+.add-column {
+  flex-shrink: 0;
+  display: flex;
+  align-items: flex-start;
+  padding-top: 10px;
+}
+
+.add-column-btn {
+  width: 40px;
+  height: 40px;
+  border-radius: 8px;
+  border: 2px dashed var(--border);
+  background: transparent;
+  font-size: 22px;
+  color: var(--text-muted);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+
+.add-column-btn:hover {
+  background: rgba(9, 30, 66, 0.04);
+  border-color: var(--text-secondary);
+  color: var(--text-secondary);
+}
+
+.add-column-form {
+  width: 200px;
+  background: var(--column-bg);
+  border-radius: 8px;
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.add-column-input {
+  font-size: 13px;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--surface);
+  color: var(--text);
+  outline: none;
+}
+
+.add-column-input:focus {
+  border-color: var(--accent);
+}
+
+.add-column-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.btn-sm {
+  padding: 4px 10px;
+  font-size: 12px;
 }
 
 .load-more-btn {

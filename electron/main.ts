@@ -307,6 +307,81 @@ function setupIPC(win: BrowserWindow): void {
     return db.getTagOptions();
   });
 
+  // ── Status Options ────────────────────────────────────────────────────
+  ipcMain.handle('statuses:get', () => {
+    return db.getStatusOptions();
+  });
+
+  ipcMain.handle('statuses:add', async (_event, name: string, color: string | null) => {
+    const maxPos = db.getMaxStatusPosition();
+    db.addStatusOption(name, color, maxPos + 1000);
+
+    try {
+      const account = getActiveAccount();
+      const token = account ? getActiveToken(account) : '';
+      const baseId = account?.baseId ?? '';
+      if (token && baseId) {
+        const client = new AirtableClient(token, baseId, account?.tableName ?? 'Tasks');
+        await client.updateStatusFieldChoices([{ name }]);
+      }
+    } catch (err) {
+      console.warn('[statuses:add] failed to push to Airtable:', err);
+    }
+
+    const options = db.getStatusOptions();
+    if (!win.isDestroyed()) win.webContents.send('statuses:updated', options);
+    return options;
+  });
+
+  ipcMain.handle('statuses:rename', async (_event, oldName: string, newName: string) => {
+    const existing = db.getStatusOptions().find((o) => o.name === oldName);
+    db.renameStatusOption(oldName, newName);
+
+    try {
+      const account = getActiveAccount();
+      const token = account ? getActiveToken(account) : '';
+      const baseId = account?.baseId ?? '';
+      if (token && baseId && existing?.airtable_choice_id) {
+        const client = new AirtableClient(token, baseId, account?.tableName ?? 'Tasks');
+        await client.updateStatusFieldChoices([{ id: existing.airtable_choice_id, name: newName }]);
+      } else if (token && baseId) {
+        const client = new AirtableClient(token, baseId, account?.tableName ?? 'Tasks');
+        await client.updateStatusFieldChoices([{ name: newName }]);
+      }
+    } catch (err) {
+      console.warn('[statuses:rename] failed to push to Airtable:', err);
+    }
+
+    const options = db.getStatusOptions();
+    if (!win.isDestroyed()) {
+      win.webContents.send('statuses:updated', options);
+      win.webContents.send('tasks:updated', db.getAllTasks());
+    }
+    return options;
+  });
+
+  ipcMain.handle('statuses:reorder', (_event, orderedNames: string[]) => {
+    db.reorderStatusOptions(orderedNames);
+    const options = db.getStatusOptions();
+    if (!win.isDestroyed()) win.webContents.send('statuses:updated', options);
+    return options;
+  });
+
+  ipcMain.handle('statuses:remove', (_event, name: string) => {
+    const options = db.getStatusOptions();
+    const remaining = options.filter((o) => o.name !== name);
+    if (remaining.length === 0) throw new Error('Cannot remove the last status');
+    const moveToStatus = remaining[0].name;
+    db.removeStatusOption(name, moveToStatus);
+
+    const updated = db.getStatusOptions();
+    if (!win.isDestroyed()) {
+      win.webContents.send('statuses:updated', updated);
+      win.webContents.send('tasks:updated', db.getAllTasks());
+    }
+    return updated;
+  });
+
   // ── Collaborators ─────────────────────────────────────────────────────
   ipcMain.handle('collaborators:get', () => {
     return db.getCollaborators();

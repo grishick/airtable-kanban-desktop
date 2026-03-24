@@ -60,6 +60,12 @@ export interface TagOption {
   color: string | null;
 }
 
+export interface StatusOption {
+  name: string;
+  color: string | null;
+  position: number;
+}
+
 contextBridge.exposeInMainWorld('electronAPI', {
   // Tasks
   getTasks: (): Promise<Task[]> =>
@@ -126,6 +132,18 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getTagOptions: (): Promise<TagOption[]> =>
     ipcRenderer.invoke('tags:getOptions'),
 
+  // Status Options
+  getStatusOptions: (): Promise<StatusOption[]> =>
+    ipcRenderer.invoke('statuses:get'),
+  addStatus: (name: string, color: string | null): Promise<StatusOption[]> =>
+    ipcRenderer.invoke('statuses:add', name, color),
+  renameStatus: (oldName: string, newName: string): Promise<StatusOption[]> =>
+    ipcRenderer.invoke('statuses:rename', oldName, newName),
+  reorderStatuses: (orderedNames: string[]): Promise<StatusOption[]> =>
+    ipcRenderer.invoke('statuses:reorder', orderedNames),
+  removeStatus: (name: string): Promise<StatusOption[]> =>
+    ipcRenderer.invoke('statuses:remove', name),
+
   // Collaborators
   getCollaborators: (): Promise<Collaborator[]> =>
     ipcRenderer.invoke('collaborators:get'),
@@ -156,6 +174,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
     const handler = (_event: Electron.IpcRendererEvent, collaborators: Collaborator[]) => cb(collaborators);
     ipcRenderer.on('collaborators:updated', handler);
     return () => ipcRenderer.removeListener('collaborators:updated', handler);
+  },
+  onStatusesUpdated: (cb: (options: StatusOption[]) => void): (() => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, options: StatusOption[]) => cb(options);
+    ipcRenderer.on('statuses:updated', handler);
+    return () => ipcRenderer.removeListener('statuses:updated', handler);
   },
 
   // OAuth

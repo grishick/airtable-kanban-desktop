@@ -15,20 +15,11 @@ export interface Task {
   is_deleted: number;
 }
 
-export type TaskStatus =
-  | 'Not Started'
-  | 'In Progress'
-  | 'Deferred'
-  | 'Waiting'
-  | 'Completed';
-
-export const STATUSES: TaskStatus[] = [
-  'Not Started',
-  'In Progress',
-  'Deferred',
-  'Waiting',
-  'Completed',
-];
+export interface StatusOption {
+  name: string;
+  color: string | null;
+  position: number;
+}
 
 export interface SyncStatus {
   state: 'idle' | 'syncing' | 'error' | 'offline' | 'unconfigured' | 'table_not_found';
@@ -130,4 +121,11 @@ export interface ElectronAPI {
   openLink(url: string): Promise<void>;
   getTagOptions(): Promise<TagOption[]>;
   showError(title: string, detail: string): Promise<void>;
+
+  getStatusOptions(): Promise<StatusOption[]>;
+  addStatus(name: string, color: string | null): Promise<StatusOption[]>;
+  renameStatus(oldName: string, newName: string): Promise<StatusOption[]>;
+  reorderStatuses(orderedNames: string[]): Promise<StatusOption[]>;
+  removeStatus(name: string): Promise<StatusOption[]>;
+  onStatusesUpdated(cb: (options: StatusOption[]) => void): () => void;
 }

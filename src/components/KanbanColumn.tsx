@@ -1,27 +1,26 @@
 import { useEffect, useRef, useState } from 'react';
-import type { Task, TaskStatus, TagOption, Collaborator } from '../types';
+import type { Task, TagOption, StatusOption, Collaborator } from '../types';
 import TaskCard from './TaskCard';
 import TaskModal from './TaskModal';
 
 interface Props {
-  status: TaskStatus;
+  status: string;
+  color: string;
   tasks: Task[];
+  allStatuses: string[];
   tagOptions: TagOption[];
+  statusOptions: StatusOption[];
   collaborators: Collaborator[];
   pageSize: number;
   onCreateTask: (data: Partial<Task>) => Promise<void>;
   onUpdateTask: (id: string, updates: Partial<Task>) => Promise<void>;
   onDeleteTask: (id: string) => Promise<void>;
-  onDrop: (taskId: string, newStatus: TaskStatus) => Promise<void>;
+  onDrop: (taskId: string, newStatus: string) => Promise<void>;
+  onRename: (newName: string) => Promise<void>;
+  onMoveLeft: (() => void) | null;
+  onMoveRight: (() => void) | null;
+  onRemove: (() => void) | null;
 }
-
-const STATUS_COLORS: Record<TaskStatus, string> = {
-  'Not Started': 'var(--col-not-started)',
-  'In Progress': 'var(--col-in-progress)',
-  'Deferred':    'var(--col-deferred)',
-  'Waiting':     'var(--col-waiting)',
-  'Completed':   'var(--col-completed)',
-};
 
 function calculatePosition(tasks: Task[], taskId: string, insertBeforeIndex: number): number {
   const others = tasks.filter((t) => t.id !== taskId);
@@ -37,34 +36,68 @@ function calculatePosition(tasks: Task[], taskId: string, insertBeforeIndex: num
 }
 
 export default function KanbanColumn({
-  status,
-  tasks,
-  tagOptions,
-  collaborators,
-  pageSize,
-  onCreateTask,
-  onUpdateTask,
-  onDeleteTask,
-  onDrop,
+  status, color, tasks, allStatuses, tagOptions, statusOptions, collaborators, pageSize,
+  onCreateTask, onUpdateTask, onDeleteTask, onDrop,
+  onRename, onMoveLeft, onMoveRight, onRemove,
 }: Props) {
   const [dragOver, setDragOver] = useState(false);
   const [editingTask, setEditingTask] = useState<Task | null>(null);
   const [creating, setCreating] = useState(false);
-  const [collapsed, setCollapsed] = useState(status === 'Completed');
+  const [collapsed, setCollapsed] = useState(false);
   const [displayCount, setDisplayCount] = useState(pageSize);
   const [dropIndex, setDropIndex] = useState<number | null>(null);
   const dropIndexRef = useRef<number | null>(null);
   const draggingFromHere = useRef(false);
   const draggedIndex = useRef<number | null>(null);
 
-  // Reset display count when pageSize setting changes
+  // Column menu state
+  const [showMenu, setShowMenu] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  // Inline rename state
+  const [isRenaming, setIsRenaming] = useState(false);
+  const [renameValue, setRenameValue] = useState(status);
+  const renameInputRef = useRef<HTMLInputElement>(null);
+
   useEffect(() => {
     setDisplayCount(pageSize);
   }, [pageSize]);
 
+  // Close menu on outside click
+  useEffect(() => {
+    if (!showMenu) return;
+    const handleClickOutside = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setShowMenu(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [showMenu]);
+
   const visibleTasks = tasks.slice(0, displayCount);
   const hiddenCount = tasks.length - displayCount;
   const loadMoreCount = Math.min(pageSize, hiddenCount);
+
+  const startRename = () => {
+    setRenameValue(status);
+    setIsRenaming(true);
+    setShowMenu(false);
+    setTimeout(() => renameInputRef.current?.select(), 0);
+  };
+
+  const commitRename = () => {
+    const trimmed = renameValue.trim();
+    if (trimmed && trimmed !== status && !allStatuses.includes(trimmed)) {
+      onRename(trimmed);
+    }
+    setIsRenaming(false);
+  };
+
+  const cancelRename = () => {
+    setRenameValue(status);
+    setIsRenaming(false);
+  };
 
   const handleDragOver = (e: React.DragEvent) => {
     e.preventDefault();
@@ -141,6 +174,19 @@ export default function KanbanColumn({
     dropIndexRef.current = newDropIndex;
   };
 
+  const handleRemove = () => {
+    setShowMenu(false);
+    if (!onRemove) return;
+    const taskCount = tasks.length;
+    if (taskCount > 0) {
+      const first = allStatuses.find((s) => s !== status) ?? 'Unknown';
+      if (!window.confirm(
+        `Delete "${status}" column? ${taskCount} task(s) will be moved to "${first}".`
+      )) return;
+    }
+    onRemove();
+  };
+
   return (
     <>
       <div
@@ -150,12 +196,53 @@ export default function KanbanColumn({
         onDrop={handleDrop}
       >
         <div className="column-header">
-          <span
-            className="column-dot"
-            style={{ background: STATUS_COLORS[status] }}
-          />
-          <span className="column-title">{status}</span>
+          <span className="column-dot" style={{ background: color }} />
+
+          {isRenaming && !collapsed ? (
+            <input
+              ref={renameInputRef}
+              className="column-title-input"
+              value={renameValue}
+              onChange={(e) => setRenameValue(e.target.value)}
+              onBlur={commitRename}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') commitRename();
+                if (e.key === 'Escape') cancelRename();
+              }}
+              autoFocus
+            />
+          ) : (
+            <span
+              className="column-title"
+              onDoubleClick={() => !collapsed && startRename()}
+              title={collapsed ? `${status} (${tasks.length})` : 'Double-click to rename'}
+            >
+              {status}
+            </span>
+          )}
+
           <span className="column-count">{tasks.length}</span>
+
+          {!collapsed && (
+            <div className="column-menu-container" ref={menuRef}>
+              <button
+                className="column-menu-btn"
+                onClick={() => setShowMenu((s) => !s)}
+                title="Column options"
+              >
+                ⋮
+              </button>
+              {showMenu && (
+                <div className="column-menu-dropdown">
+                  <button onClick={startRename}>Rename</button>
+                  {onMoveLeft && <button onClick={() => { setShowMenu(false); onMoveLeft(); }}>Move Left</button>}
+                  {onMoveRight && <button onClick={() => { setShowMenu(false); onMoveRight(); }}>Move Right</button>}
+                  {onRemove && <button className="danger" onClick={handleRemove}>Delete Column</button>}
+                </div>
+              )}
+            </div>
+          )}
+
           <button
             className="column-collapse-btn"
             onClick={() => setCollapsed((c) => !c)}
@@ -208,6 +295,7 @@ export default function KanbanColumn({
           task={null}
           initialStatus={status}
           tagOptions={tagOptions}
+          statusOptions={statusOptions}
           collaborators={collaborators}
           onSave={onCreateTask}
           onClose={() => setCreating(false)}
@@ -218,6 +306,7 @@ export default function KanbanColumn({
         <TaskModal
           task={editingTask}
           tagOptions={tagOptions}
+          statusOptions={statusOptions}
           collaborators={collaborators}
           onSave={(updates) => onUpdateTask(editingTask.id, updates)}
           onDelete={() => onDeleteTask(editingTask.id)}

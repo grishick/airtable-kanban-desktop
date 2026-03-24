@@ -1,13 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
-import type { Task, TaskStatus, TagOption, Collaborator } from '../types';
-import { STATUSES } from '../types';
+import type { Task, TagOption, StatusOption, Collaborator } from '../types';
 import RichTextEditor from './RichTextEditor';
 import MultiSelectTags from './MultiSelectTags';
 
 interface Props {
   task: Task | null;       // null → create mode
-  initialStatus?: TaskStatus;
+  initialStatus?: string;
   tagOptions: TagOption[];
+  statusOptions: StatusOption[];
   collaborators: Collaborator[];
   onSave: (data: Partial<Task>) => Promise<void>;
   onDelete?: () => Promise<void>;
@@ -24,7 +24,7 @@ function parseAssignedTo(value: string | null): string {
   }
 }
 
-export default function TaskModal({ task, initialStatus, tagOptions, collaborators, onSave, onDelete, onClose }: Props) {
+export default function TaskModal({ task, initialStatus, tagOptions, statusOptions, collaborators, onSave, onDelete, onClose }: Props) {
   const [title, setTitle]       = useState(task?.title ?? '');
   const [desc, setDesc]         = useState(task?.description ?? '');
   const [status, setStatus]     = useState<string>(task?.status ?? initialStatus ?? 'Not Started');
@@ -125,8 +125,8 @@ export default function TaskModal({ task, initialStatus, tagOptions, collaborato
               <div className="form-group">
                 <label htmlFor="task-status">Status</label>
                 <select id="task-status" value={status} onChange={(e) => setStatus(e.target.value)}>
-                  {STATUSES.map((s) => (
-                    <option key={s} value={s}>{s}</option>
+                  {statusOptions.map((s) => (
+                    <option key={s.name} value={s.name}>{s.name}</option>
                   ))}
                 </select>
               </div>

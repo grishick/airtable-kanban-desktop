@@ -53,6 +53,13 @@ export interface TagOption {
   color: string | null;
 }
 
+export interface StatusOption {
+  name: string;
+  color: string | null;
+  position: number;
+  airtable_choice_id: string | null;
+}
+
 export interface Collaborator {
   user_id: string;
   email: string | null;
@@ -96,6 +103,13 @@ function migrate(): void {
       airtable_id TEXT UNIQUE
     );
 
+    CREATE TABLE IF NOT EXISTS status_options (
+      name               TEXT PRIMARY KEY,
+      color              TEXT,
+      position           REAL NOT NULL DEFAULT 0,
+      airtable_choice_id TEXT
+    );
+
     CREATE TABLE IF NOT EXISTS pending_ops (
       id          INTEGER PRIMARY KEY AUTOINCREMENT,
       op_type     TEXT NOT NULL,
@@ -106,6 +120,24 @@ function migrate(): void {
       last_error  TEXT
     );
   `);
+  seedStatusDefaults();
+}
+
+const DEFAULT_STATUSES: Array<{ name: string; color: string; position: number }> = [
+  { name: 'Not Started', color: '#97a0af', position: 0 },
+  { name: 'In Progress', color: '#0052cc', position: 1000 },
+  { name: 'Deferred',    color: '#ff8b00', position: 2000 },
+  { name: 'Waiting',     color: '#e5a000', position: 3000 },
+  { name: 'Completed',   color: '#00875a', position: 4000 },
+];
+
+function seedStatusDefaults(): void {
+  const count = db.prepare('SELECT COUNT(*) as c FROM status_options').get() as { c: number };
+  if (count.c > 0) return;
+  const stmt = db.prepare('INSERT OR IGNORE INTO status_options (name, color, position) VALUES (?, ?, ?)');
+  for (const d of DEFAULT_STATUSES) {
+    stmt.run(d.name, d.color, d.position);
+  }
 }
 
 function now(): string {
@@ -258,6 +290,75 @@ export function replaceTagOptions(options: TagOption[]): void {
     }
   });
   tx();
+}
+
+// ── Status Options ─────────────────────────────────────────────────────
+
+export const STATUS_COLOR_PALETTE = [
+  '#97a0af', '#0052cc', '#ff8b00', '#e5a000', '#00875a',
+  '#6554c0', '#ff5630', '#00b8d9', '#ff991f', '#36b37e',
+  '#8777d9', '#ff7452', '#00c7e6', '#ffc400', '#57d9a3',
+];
+
+export function getStatusOptions(): StatusOption[] {
+  return db.prepare('SELECT name, color, position, airtable_choice_id FROM status_options ORDER BY position ASC').all() as StatusOption[];
+}
+
+export function replaceStatusOptions(options: StatusOption[]): void {
+  const tx = db.transaction(() => {
+    db.prepare('DELETE FROM status_options').run();
+    const stmt = db.prepare('INSERT INTO status_options (name, color, position, airtable_choice_id) VALUES (?, ?, ?, ?)');
+    for (const opt of options) {
+      stmt.run(opt.name, opt.color, opt.position, opt.airtable_choice_id);
+    }
+  });
+  tx();
+}
+
+export function addStatusOption(name: string, color: string | null, position: number): void {
+  db.prepare('INSERT OR IGNORE INTO status_options (name, color, position) VALUES (?, ?, ?)').run(name, color, position);
+}
+
+export function renameStatusOption(oldName: string, newName: string): void {
+  const n = now();
+  const tx = db.transaction(() => {
+    const old = db.prepare('SELECT color, position, airtable_choice_id FROM status_options WHERE name = ?')
+      .get(oldName) as { color: string | null; position: number; airtable_choice_id: string | null } | undefined;
+    if (!old) return;
+    db.prepare('INSERT OR REPLACE INTO status_options (name, color, position, airtable_choice_id) VALUES (?, ?, ?, ?)')
+      .run(newName, old.color, old.position, old.airtable_choice_id);
+    db.prepare('DELETE FROM status_options WHERE name = ?').run(oldName);
+    db.prepare('UPDATE tasks SET status = ?, updated_at = ? WHERE status = ?').run(newName, n, oldName);
+  });
+  tx();
+}
+
+export function removeStatusOption(name: string, moveToStatus: string): void {
+  const n = now();
+  const tx = db.transaction(() => {
+    db.prepare('DELETE FROM status_options WHERE name = ?').run(name);
+    db.prepare('UPDATE tasks SET status = ?, updated_at = ? WHERE status = ?').run(moveToStatus, n, name);
+  });
+  tx();
+}
+
+export function reorderStatusOptions(orderedNames: string[]): void {
+  const tx = db.transaction(() => {
+    const stmt = db.prepare('UPDATE status_options SET position = ? WHERE name = ?');
+    orderedNames.forEach((name, idx) => {
+      stmt.run(idx * 1000, name);
+    });
+  });
+  tx();
+}
+
+export function getMaxStatusPosition(): number {
+  const row = db.prepare('SELECT MAX(position) as m FROM status_options').get() as { m: number | null };
+  return row.m ?? 0;
+}
+
+export function bulkRenameTaskStatus(oldStatus: string, newStatus: string): void {
+  db.prepare('UPDATE tasks SET status = ?, updated_at = ? WHERE status = ?').run(newStatus, now(), oldStatus);
 }
 
 // ── Collaborators ──────────────────────────────────────────────────────

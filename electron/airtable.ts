@@ -7,9 +7,10 @@ interface MetaTable {
   id: string;
   name: string;
   fields: Array<{
+    id: string;
     name: string;
     type: string;
-    options?: { choices?: Array<{ name: string; color?: string }> };
+    options?: { choices?: Array<{ id?: string; name: string; color?: string }> };
   }>;
 }
 
@@ -271,6 +272,54 @@ export class AirtableClient {
       return field.options.choices.map((c) => ({ name: c.name, color: c.color ?? null }));
     } catch {
       return [];
+    }
+  }
+
+  async fetchStatusOptions(): Promise<Array<{ id?: string; name: string; color?: string }>> {
+    const metaUrl = `https://api.airtable.com/v0/meta/bases/${this.baseId}/tables`;
+    try {
+      const resp = await fetch(metaUrl, {
+        headers: this.headers,
+        signal: AbortSignal.timeout(10000),
+      });
+      if (!resp.ok) return [];
+      const data = (await resp.json()) as MetaTablesResponse;
+      const table = data.tables.find((t) => t.name === this.tableName);
+      if (!table) return [];
+      const field = table.fields.find((f) => f.name === 'Status');
+      if (!field?.options?.choices) return [];
+      return field.options.choices.map((c) => ({ id: c.id, name: c.name, color: c.color }));
+    } catch {
+      return [];
+    }
+  }
+
+  async updateStatusFieldChoices(choices: Array<{ id?: string; name: string }>): Promise<void> {
+    const metaUrl = `https://api.airtable.com/v0/meta/bases/${this.baseId}/tables`;
+    const resp = await fetch(metaUrl, {
+      headers: this.headers,
+      signal: AbortSignal.timeout(10000),
+    });
+    if (!resp.ok) throw new Error(`Failed to fetch table metadata: ${resp.status}`);
+    const data = (await resp.json()) as MetaTablesResponse;
+    const table = data.tables.find((t) => t.name === this.tableName);
+    if (!table) throw new Error('Table not found');
+    const field = table.fields.find((f) => f.name === 'Status');
+    if (!field) throw new Error('Status field not found');
+
+    const updateResp = await fetch(`${metaUrl}/${table.id}/fields/${field.id}`, {
+      method: 'PATCH',
+      headers: this.headers,
+      body: JSON.stringify({
+        options: {
+          choices: choices.map((c) => c.id ? { id: c.id, name: c.name } : { name: c.name }),
+        },
+      }),
+      signal: AbortSignal.timeout(10000),
+    });
+    if (!updateResp.ok) {
+      const text = await updateResp.text();
+      throw new Error(`Failed to update Status field choices: ${updateResp.status}: ${text}`);
     }
   }
 

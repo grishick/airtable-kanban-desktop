@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
-import type { Task, SyncStatus, TagOption, Account, Collaborator } from './types';
+import type { Task, SyncStatus, TagOption, StatusOption, Account, Collaborator } from './types';
 import KanbanBoard from './components/KanbanBoard';
 import Settings from './components/Settings';
 
@@ -9,6 +9,7 @@ export default function App() {
   const [page, setPage] = useState<Page>('board');
   const [tasks, setTasks] = useState<Task[]>([]);
   const [tagOptions, setTagOptions] = useState<TagOption[]>([]);
+  const [statusOptions, setStatusOptions] = useState<StatusOption[]>([]);
   const [collaborators, setCollaborators] = useState<Collaborator[]>([]);
   const [pageSize, setPageSize] = useState(10);
   const [accounts, setAccounts] = useState<Account[]>([]);
@@ -41,6 +42,7 @@ export default function App() {
       autoNavigateToSettings(status.state);
     }).catch(console.error);
     window.electronAPI.getTagOptions().then(setTagOptions).catch(console.error);
+    window.electronAPI.getStatusOptions().then(setStatusOptions).catch(console.error);
     window.electronAPI.getCollaborators().then(setCollaborators).catch(console.error);
     loadSettings();
     window.electronAPI.listAccounts().then(({ accounts, activeId }) => {
@@ -56,6 +58,7 @@ export default function App() {
       window.electronAPI.getTagOptions().then(setTagOptions).catch(console.error);
     });
     const unsub4 = window.electronAPI.onCollaboratorsUpdated(setCollaborators);
+    const unsub5 = window.electronAPI.onStatusesUpdated(setStatusOptions);
     const unsub2 = window.electronAPI.onSyncStatus((status) => {
       setSyncStatus(status);
       autoNavigateToSettings(status.state);
@@ -64,7 +67,7 @@ export default function App() {
       setAccounts(accounts);
       setActiveAccountId(activeId);
     });
-    return () => { unsub1(); unsub2(); unsub3(); unsub4(); };
+    return () => { unsub1(); unsub2(); unsub3(); unsub4(); unsub5(); };
   }, [autoNavigateToSettings]);
 
   // Show error dialog when sync fails (but not for transient offline state)
@@ -130,6 +133,55 @@ export default function App() {
     loadSettings();
     setPage('board');
   }, [loadSettings]);
+
+  const STATUS_COLOR_PALETTE = [
+    '#97a0af', '#0052cc', '#ff8b00', '#e5a000', '#00875a',
+    '#6554c0', '#ff5630', '#00b8d9', '#ff991f', '#36b37e',
+    '#8777d9', '#ff7452', '#00c7e6', '#ffc400', '#57d9a3',
+  ];
+
+  const handleAddStatus = useCallback(async (name: string) => {
+    const usedColors = new Set(statusOptions.map((o) => o.color));
+    const color = STATUS_COLOR_PALETTE.find((c) => !usedColors.has(c))
+      ?? STATUS_COLOR_PALETTE[statusOptions.length % STATUS_COLOR_PALETTE.length];
+    try {
+      const updated = await window.electronAPI.addStatus(name, color);
+      setStatusOptions(updated);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      await window.electronAPI.showError('Failed to Add Status', msg);
+    }
+  }, [statusOptions]);
+
+  const handleRenameStatus = useCallback(async (oldName: string, newName: string) => {
+    try {
+      const updated = await window.electronAPI.renameStatus(oldName, newName);
+      setStatusOptions(updated);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      await window.electronAPI.showError('Failed to Rename Status', msg);
+    }
+  }, []);
+
+  const handleReorderStatuses = useCallback(async (orderedNames: string[]) => {
+    try {
+      const updated = await window.electronAPI.reorderStatuses(orderedNames);
+      setStatusOptions(updated);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      await window.electronAPI.showError('Failed to Reorder Statuses', msg);
+    }
+  }, []);
+
+  const handleRemoveStatus = useCallback(async (name: string) => {
+    try {
+      const updated = await window.electronAPI.removeStatus(name);
+      setStatusOptions(updated);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      await window.electronAPI.showError('Failed to Remove Status', msg);
+    }
+  }, []);
 
   const handleCreateTable = useCallback(async () => {
     try {
@@ -214,11 +266,16 @@ export default function App() {
         <KanbanBoard
           tasks={tasks}
           tagOptions={tagOptions}
+          statusOptions={statusOptions}
           collaborators={collaborators}
           pageSize={pageSize}
           onCreateTask={handleCreateTask}
           onUpdateTask={handleUpdateTask}
           onDeleteTask={handleDeleteTask}
+          onAddStatus={handleAddStatus}
+          onRenameStatus={handleRenameStatus}
+          onReorderStatuses={handleReorderStatuses}
+          onRemoveStatus={handleRemoveStatus}
         />
       ) : (
         <Settings onSaved={handleSettingsSaved} />
