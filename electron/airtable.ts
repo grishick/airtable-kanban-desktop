@@ -294,7 +294,14 @@ export class AirtableClient {
     }
   }
 
-  async updateStatusFieldChoices(choices: Array<{ id?: string; name: string }>): Promise<void> {
+  /**
+   * Update the Status singleSelect field choices in Airtable.
+   * The Airtable API requires ALL existing choices to be included in the
+   * PATCH request — sending only new/modified choices causes a 422.
+   * This method fetches the current choices, merges modifications, and
+   * sends the complete list.
+   */
+  async updateStatusFieldChoices(modifications: Array<{ id?: string; name: string }>): Promise<void> {
     const metaUrl = `https://api.airtable.com/v0/meta/bases/${this.baseId}/tables`;
     const resp = await fetch(metaUrl, {
       headers: this.headers,
@@ -307,13 +314,23 @@ export class AirtableClient {
     const field = table.fields.find((f) => f.name === 'Status');
     if (!field) throw new Error('Status field not found in Airtable table');
 
+    const existing = field.options?.choices ?? [];
+    const modById = new Map(modifications.filter((m) => m.id).map((m) => [m.id!, m]));
+    const newChoices = modifications.filter((m) => !m.id);
+
+    const merged = existing.map((c) => {
+      const mod = c.id ? modById.get(c.id) : undefined;
+      return mod ? { id: c.id, name: mod.name, color: c.color } : { id: c.id, name: c.name, color: c.color };
+    });
+    for (const nc of newChoices) {
+      merged.push({ name: nc.name } as typeof merged[number]);
+    }
+
     const updateResp = await fetch(`${metaUrl}/${table.id}/fields/${field.id}`, {
       method: 'PATCH',
       headers: this.headers,
       body: JSON.stringify({
-        options: {
-          choices: choices.map((c) => c.id ? { id: c.id, name: c.name } : { name: c.name }),
-        },
+        options: { choices: merged },
       }),
       signal: AbortSignal.timeout(10000),
     });
