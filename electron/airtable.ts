@@ -303,9 +303,9 @@ export class AirtableClient {
     if (!resp.ok) throw new Error(`Failed to fetch table metadata: ${resp.status}`);
     const data = (await resp.json()) as MetaTablesResponse;
     const table = data.tables.find((t) => t.name === this.tableName);
-    if (!table) throw new Error('Table not found');
+    if (!table) throw new Error('Table not found in Airtable');
     const field = table.fields.find((f) => f.name === 'Status');
-    if (!field) throw new Error('Status field not found');
+    if (!field) throw new Error('Status field not found in Airtable table');
 
     const updateResp = await fetch(`${metaUrl}/${table.id}/fields/${field.id}`, {
       method: 'PATCH',
@@ -319,7 +319,14 @@ export class AirtableClient {
     });
     if (!updateResp.ok) {
       const text = await updateResp.text();
-      throw new Error(`Failed to update Status field choices: ${updateResp.status}: ${text}`);
+      if (updateResp.status === 403) {
+        throw new Error(
+          'Airtable 403: Cannot update Status field — your token is missing the ' +
+          '"schema.bases:write" scope. Go to airtable.com → Account → Developer hub → ' +
+          'edit your token and add that scope.',
+        );
+      }
+      throw new Error(`Airtable ${updateResp.status}: ${text}`);
     }
   }
 

@@ -7,6 +7,7 @@ import {
   loadAccountsFile,
   getActiveAccount,
   getActiveToken,
+  refreshOAuthTokenIfNeeded,
   dbPathForAccount,
   addAccount,
   updateAccount,
@@ -20,6 +21,18 @@ import { startOAuthFlow } from './oauth';
 const isDev = process.env.NODE_ENV === 'development';
 let syncEngine: SyncEngine | null = null;
 let oauthAbortController: AbortController | null = null;
+
+async function getAirtableClient(): Promise<AirtableClient | null> {
+  const account = getActiveAccount();
+  if (!account) return null;
+  if (account.authType === 'oauth') {
+    const lambdaUrl = db.getSettings()['oauth_lambda_url'] ?? '';
+    await refreshOAuthTokenIfNeeded(account, lambdaUrl);
+  }
+  const token = getActiveToken(account);
+  if (!token || !account.baseId) return null;
+  return new AirtableClient(token, account.baseId, account.tableName ?? 'Tasks');
+}
 
 function createWindow(): BrowserWindow {
   const win = new BrowserWindow({
@@ -316,20 +329,28 @@ function setupIPC(win: BrowserWindow): void {
     const maxPos = db.getMaxStatusPosition();
     db.addStatusOption(name, color, maxPos + 1000);
 
+    let airtableError: string | null = null;
     try {
-      const account = getActiveAccount();
-      const token = account ? getActiveToken(account) : '';
-      const baseId = account?.baseId ?? '';
-      if (token && baseId) {
-        const client = new AirtableClient(token, baseId, account?.tableName ?? 'Tasks');
+      const client = await getAirtableClient();
+      if (client) {
         await client.updateStatusFieldChoices([{ name }]);
       }
     } catch (err) {
-      console.warn('[statuses:add] failed to push to Airtable:', err);
+      airtableError = err instanceof Error ? err.message : String(err);
+      console.warn('[statuses:add] failed to push to Airtable:', airtableError);
     }
 
     const options = db.getStatusOptions();
     if (!win.isDestroyed()) win.webContents.send('statuses:updated', options);
+    if (airtableError && !win.isDestroyed()) {
+      dialog.showMessageBox(win, {
+        type: 'warning',
+        title: 'Status added locally',
+        message: 'The new status was saved locally but could not be pushed to Airtable.',
+        detail: airtableError,
+        buttons: ['OK'],
+      });
+    }
     return options;
   });
 
@@ -337,25 +358,34 @@ function setupIPC(win: BrowserWindow): void {
     const existing = db.getStatusOptions().find((o) => o.name === oldName);
     db.renameStatusOption(oldName, newName);
 
+    let airtableError: string | null = null;
     try {
-      const account = getActiveAccount();
-      const token = account ? getActiveToken(account) : '';
-      const baseId = account?.baseId ?? '';
-      if (token && baseId && existing?.airtable_choice_id) {
-        const client = new AirtableClient(token, baseId, account?.tableName ?? 'Tasks');
-        await client.updateStatusFieldChoices([{ id: existing.airtable_choice_id, name: newName }]);
-      } else if (token && baseId) {
-        const client = new AirtableClient(token, baseId, account?.tableName ?? 'Tasks');
-        await client.updateStatusFieldChoices([{ name: newName }]);
+      const client = await getAirtableClient();
+      if (client) {
+        if (existing?.airtable_choice_id) {
+          await client.updateStatusFieldChoices([{ id: existing.airtable_choice_id, name: newName }]);
+        } else {
+          await client.updateStatusFieldChoices([{ name: newName }]);
+        }
       }
     } catch (err) {
-      console.warn('[statuses:rename] failed to push to Airtable:', err);
+      airtableError = err instanceof Error ? err.message : String(err);
+      console.warn('[statuses:rename] failed to push to Airtable:', airtableError);
     }
 
     const options = db.getStatusOptions();
     if (!win.isDestroyed()) {
       win.webContents.send('statuses:updated', options);
       win.webContents.send('tasks:updated', db.getAllTasks());
+    }
+    if (airtableError && !win.isDestroyed()) {
+      dialog.showMessageBox(win, {
+        type: 'warning',
+        title: 'Status renamed locally',
+        message: 'The status was renamed locally but the change could not be pushed to Airtable.',
+        detail: airtableError,
+        buttons: ['OK'],
+      });
     }
     return options;
   });
