@@ -361,6 +361,11 @@ export function bulkRenameTaskStatus(oldStatus: string, newStatus: string): void
   db.prepare('UPDATE tasks SET status = ?, updated_at = ? WHERE status = ?').run(newStatus, now(), oldStatus);
 }
 
+export function getTaskCountByStatus(status: string): number {
+  const row = db.prepare('SELECT COUNT(*) as c FROM tasks WHERE status = ? AND is_deleted = 0').get(status) as { c: number };
+  return row.c;
+}
+
 // ── Collaborators ──────────────────────────────────────────────────────
 
 export function getCollaborators(): Collaborator[] {

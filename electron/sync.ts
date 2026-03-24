@@ -340,6 +340,9 @@ export class SyncEngine {
             airtable_choice_id: rc.id ?? null,
           });
         } else {
+          // Only add an Airtable-only choice if tasks actually use it.
+          // Stale choices (e.g. left over after a rename) are skipped.
+          if (db.getTaskCountByStatus(rc.name) === 0) continue;
           maxPos += 1000;
           const color = db.STATUS_COLOR_PALETTE.find((c) => !usedColors.has(c))
             ?? db.STATUS_COLOR_PALETTE[result.length % db.STATUS_COLOR_PALETTE.length];
