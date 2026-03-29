@@ -79,6 +79,9 @@ export async function fetchTables(token: string, baseId: string): Promise<{ name
 
 export class AirtableClient {
   private readonly baseUrl = 'https://api.airtable.com/v0';
+  private static readonly MIN_REQUEST_INTERVAL_MS = 210; // ~4.7 req/s, safely under Airtable's 5/s limit
+  private static readonly MAX_429_RETRIES = 3;
+  private lastRequestTime = 0;
 
   constructor(
     private token: string,
@@ -97,9 +100,36 @@ export class AirtableClient {
     return `${this.baseUrl}/${this.baseId}/${encodeURIComponent(this.tableName)}`;
   }
 
+  /**
+   * Rate-limited fetch that spaces requests at least MIN_REQUEST_INTERVAL_MS
+   * apart and retries on 429 (rate limit) responses.
+   */
+  private async throttledFetch(input: string | URL, init?: RequestInit): Promise<Response> {
+    const now = Date.now();
+    const elapsed = now - this.lastRequestTime;
+    if (elapsed < AirtableClient.MIN_REQUEST_INTERVAL_MS) {
+      await new Promise((r) => setTimeout(r, AirtableClient.MIN_REQUEST_INTERVAL_MS - elapsed));
+    }
+
+    for (let attempt = 0; attempt <= AirtableClient.MAX_429_RETRIES; attempt++) {
+      this.lastRequestTime = Date.now();
+      const resp = await fetch(input.toString(), init);
+
+      if (resp.status !== 429) return resp;
+
+      const retryAfter = parseInt(resp.headers.get('Retry-After') ?? '', 10);
+      const delayMs = (Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter : 30) * 1000;
+      console.warn(`[airtable] 429 rate limited, retrying in ${delayMs}ms (attempt ${attempt + 1}/${AirtableClient.MAX_429_RETRIES})`);
+      await new Promise((r) => setTimeout(r, delayMs));
+    }
+
+    this.lastRequestTime = Date.now();
+    return fetch(input.toString(), init);
+  }
+
   async checkHealth(): Promise<boolean> {
     try {
-      const resp = await fetch(`${this.tableUrl}?maxRecords=1`, {
+      const resp = await this.throttledFetch(`${this.tableUrl}?maxRecords=1`, {
         headers: this.headers,
         signal: AbortSignal.timeout(5000),
       });
@@ -117,7 +147,7 @@ export class AirtableClient {
       const url = new URL(this.tableUrl);
       if (offset) url.searchParams.set('offset', offset);
 
-      const resp = await fetch(url.toString(), {
+      const resp = await this.throttledFetch(url.toString(), {
         headers: this.headers,
         signal: AbortSignal.timeout(30000),
       });
@@ -135,7 +165,7 @@ export class AirtableClient {
   }
 
   async createRecord(fields: AirtableFields): Promise<AirtableRecord> {
-    const resp = await fetch(this.tableUrl, {
+    const resp = await this.throttledFetch(this.tableUrl, {
       method: 'POST',
       headers: this.headers,
       body: JSON.stringify({ fields, typecast: true }),
@@ -149,7 +179,7 @@ export class AirtableClient {
   }
 
   async updateRecord(recordId: string, fields: AirtableFields): Promise<AirtableRecord> {
-    const resp = await fetch(`${this.tableUrl}/${recordId}`, {
+    const resp = await this.throttledFetch(`${this.tableUrl}/${recordId}`, {
       method: 'PATCH',
       headers: this.headers,
       body: JSON.stringify({ fields, typecast: true }),
@@ -165,7 +195,7 @@ export class AirtableClient {
   async updateRecords(updates: { id: string; fields: AirtableFields }[]): Promise<void> {
     for (let i = 0; i < updates.length; i += 10) {
       const batch = updates.slice(i, i + 10);
-      const resp = await fetch(this.tableUrl, {
+      const resp = await this.throttledFetch(this.tableUrl, {
         method: 'PATCH',
         headers: this.headers,
         body: JSON.stringify({ records: batch }),
@@ -178,7 +208,7 @@ export class AirtableClient {
   }
 
   async deleteRecord(recordId: string): Promise<void> {
-    const resp = await fetch(`${this.tableUrl}/${recordId}`, {
+    const resp = await this.throttledFetch(`${this.tableUrl}/${recordId}`, {
       method: 'DELETE',
       headers: this.headers,
       signal: AbortSignal.timeout(15000),
@@ -191,7 +221,7 @@ export class AirtableClient {
 
   async createTable(): Promise<void> {
     const url = `https://api.airtable.com/v0/meta/bases/${this.baseId}/tables`;
-    const resp = await fetch(url, {
+    const resp = await this.throttledFetch(url, {
       method: 'POST',
       headers: this.headers,
       body: JSON.stringify({
@@ -239,7 +269,7 @@ export class AirtableClient {
 
   async ensurePositionField(): Promise<void> {
     const metaUrl = `https://api.airtable.com/v0/meta/bases/${this.baseId}/tables`;
-    const resp = await fetch(metaUrl, {
+    const resp = await this.throttledFetch(metaUrl, {
       headers: this.headers,
       signal: AbortSignal.timeout(10000),
     });
@@ -248,7 +278,7 @@ export class AirtableClient {
     const table = data.tables.find((t) => t.name === this.tableName);
     if (!table || table.fields.some((f) => f.name === 'Position')) return;
 
-    await fetch(`${metaUrl}/${table.id}/fields`, {
+    await this.throttledFetch(`${metaUrl}/${table.id}/fields`, {
       method: 'POST',
       headers: this.headers,
       body: JSON.stringify({ name: 'Position', type: 'number', options: { precision: 1 } }),
@@ -259,7 +289,7 @@ export class AirtableClient {
   async fetchTagOptions(tagsFieldName = 'Tags'): Promise<TagOption[]> {
     const metaUrl = `https://api.airtable.com/v0/meta/bases/${this.baseId}/tables`;
     try {
-      const resp = await fetch(metaUrl, {
+      const resp = await this.throttledFetch(metaUrl, {
         headers: this.headers,
         signal: AbortSignal.timeout(10000),
       });
@@ -278,7 +308,7 @@ export class AirtableClient {
   async fetchStatusOptions(): Promise<Array<{ id?: string; name: string; color?: string }>> {
     const metaUrl = `https://api.airtable.com/v0/meta/bases/${this.baseId}/tables`;
     try {
-      const resp = await fetch(metaUrl, {
+      const resp = await this.throttledFetch(metaUrl, {
         headers: this.headers,
         signal: AbortSignal.timeout(10000),
       });
@@ -296,7 +326,7 @@ export class AirtableClient {
 
   async ensureAssigneeField(): Promise<void> {
     const metaUrl = `https://api.airtable.com/v0/meta/bases/${this.baseId}/tables`;
-    const resp = await fetch(metaUrl, {
+    const resp = await this.throttledFetch(metaUrl, {
       headers: this.headers,
       signal: AbortSignal.timeout(10000),
     });
@@ -305,7 +335,7 @@ export class AirtableClient {
     const table = data.tables.find((t) => t.name === this.tableName);
     if (!table || table.fields.some((f) => f.name === 'Assignee')) return;
 
-    await fetch(`${metaUrl}/${table.id}/fields`, {
+    await this.throttledFetch(`${metaUrl}/${table.id}/fields`, {
       method: 'POST',
       headers: this.headers,
       body: JSON.stringify({ name: 'Assignee', type: 'singleCollaborator' }),
@@ -315,7 +345,7 @@ export class AirtableClient {
 
   async ensureCreatedByField(): Promise<void> {
     const metaUrl = `https://api.airtable.com/v0/meta/bases/${this.baseId}/tables`;
-    const resp = await fetch(metaUrl, {
+    const resp = await this.throttledFetch(metaUrl, {
       headers: this.headers,
       signal: AbortSignal.timeout(10000),
     });
@@ -324,7 +354,7 @@ export class AirtableClient {
     const table = data.tables.find((t) => t.name === this.tableName);
     if (!table || table.fields.some((f) => f.name === 'Created By')) return;
 
-    await fetch(`${metaUrl}/${table.id}/fields`, {
+    await this.throttledFetch(`${metaUrl}/${table.id}/fields`, {
       method: 'POST',
       headers: this.headers,
       body: JSON.stringify({ name: 'Created By', type: 'createdBy' }),
@@ -346,7 +376,7 @@ export class AirtableClient {
       const url = new URL(this.collabTableUrl(tableName));
       if (offset) url.searchParams.set('offset', offset);
 
-      const resp = await fetch(url.toString(), {
+      const resp = await this.throttledFetch(url.toString(), {
         headers: this.headers,
         signal: AbortSignal.timeout(30000),
       });
@@ -380,7 +410,7 @@ export class AirtableClient {
           Name: c.name ?? '',
         },
       }));
-      const resp = await fetch(this.collabTableUrl(tableName), {
+      const resp = await this.throttledFetch(this.collabTableUrl(tableName), {
         method: 'POST',
         headers: this.headers,
         body: JSON.stringify({ records: batch }),
@@ -397,7 +427,7 @@ export class AirtableClient {
 
   async createCollaboratorsTable(tableName: string): Promise<void> {
     const url = `https://api.airtable.com/v0/meta/bases/${this.baseId}/tables`;
-    const resp = await fetch(url, {
+    const resp = await this.throttledFetch(url, {
       method: 'POST',
       headers: this.headers,
       body: JSON.stringify({
@@ -421,7 +451,7 @@ export class AirtableClient {
 
   async inviteCollaborator(email: string, permissionLevel: string): Promise<void> {
     const url = `https://api.airtable.com/v0/meta/bases/${this.baseId}/collaborators`;
-    const resp = await fetch(url, {
+    const resp = await this.throttledFetch(url, {
       method: 'POST',
       headers: this.headers,
       body: JSON.stringify({
