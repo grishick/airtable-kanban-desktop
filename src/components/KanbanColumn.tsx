@@ -7,6 +7,8 @@ interface Props {
   status: string;
   color: string;
   tasks: Task[];
+  /** When true, tasks are ordered by position descending (newest-on-top lane). */
+  newestFirst?: boolean;
   allStatuses: string[];
   tagOptions: TagOption[];
   statusOptions: StatusOption[];
@@ -22,7 +24,12 @@ interface Props {
   onRemove: (() => void) | null;
 }
 
-function calculatePosition(tasks: Task[], taskId: string, insertBeforeIndex: number): number {
+function calculatePosition(
+  tasks: Task[],
+  taskId: string,
+  insertBeforeIndex: number,
+  newestFirst: boolean,
+): number {
   const others = tasks.filter((t) => t.id !== taskId);
   const originalIndex = tasks.findIndex((t) => t.id === taskId);
   let idx = insertBeforeIndex;
@@ -30,13 +37,18 @@ function calculatePosition(tasks: Task[], taskId: string, insertBeforeIndex: num
   idx = Math.max(0, Math.min(idx, others.length));
 
   if (others.length === 0) return 1000;
-  if (idx === 0) return others[0].position - 1000;
-  if (idx >= others.length) return others[others.length - 1].position + 1000;
+  if (newestFirst) {
+    if (idx === 0) return others[0].position + 1000;
+    if (idx >= others.length) return others[others.length - 1].position - 1000;
+  } else {
+    if (idx === 0) return others[0].position - 1000;
+    if (idx >= others.length) return others[others.length - 1].position + 1000;
+  }
   return (others[idx - 1].position + others[idx].position) / 2;
 }
 
 export default function KanbanColumn({
-  status, color, tasks, allStatuses, tagOptions, statusOptions, collaborators, pageSize,
+  status, color, tasks, newestFirst = false, allStatuses, tagOptions, statusOptions, collaborators, pageSize,
   onCreateTask, onUpdateTask, onDeleteTask, onDrop,
   onRename, onMoveLeft, onMoveRight, onRemove,
 }: Props) {
@@ -129,7 +141,7 @@ export default function KanbanColumn({
     dropIndexRef.current = null;
 
     if (isWithinLane) {
-      const newPosition = calculatePosition(tasks, taskId, idx);
+      const newPosition = calculatePosition(tasks, taskId, idx, newestFirst);
       await onUpdateTask(taskId, { position: newPosition });
     } else {
       await onDrop(taskId, status);

@@ -17,6 +17,12 @@ interface Props {
   onRemoveStatus: (name: string) => Promise<void>;
 }
 
+/** Done-style columns: highest position (newest moved in) at top. */
+function isDoneLikeColumn(status: string): boolean {
+  const n = status.trim().toLowerCase();
+  return n === 'done' || n === 'completed';
+}
+
 export default function KanbanBoard({
   tasks, tagOptions, statusOptions, collaborators, pageSize,
   onCreateTask, onUpdateTask, onDeleteTask,
@@ -39,10 +45,13 @@ export default function KanbanBoard({
     await onUpdateTask(taskId, { status: newStatus, position: maxPos + 1000 });
   };
 
-  const tasksByStatus = (status: string) =>
-    tasks
-      .filter((t) => t.status === status)
-      .sort((a, b) => a.position - b.position);
+  const tasksByStatus = (status: string) => {
+    const filtered = tasks.filter((t) => t.status === status);
+    if (isDoneLikeColumn(status)) {
+      return filtered.sort((a, b) => b.position - a.position);
+    }
+    return filtered.sort((a, b) => a.position - b.position);
+  };
 
   const handleMoveLeft = (index: number) => {
     if (index <= 0) return;
@@ -76,6 +85,7 @@ export default function KanbanBoard({
             status={status}
             color={colorMap.get(status) ?? '#97a0af'}
             tasks={tasksByStatus(status)}
+            newestFirst={isDoneLikeColumn(status)}
             allStatuses={statuses}
             tagOptions={tagOptions}
             collaborators={collaborators}
