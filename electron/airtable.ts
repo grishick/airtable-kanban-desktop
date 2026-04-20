@@ -124,7 +124,10 @@ export class AirtableClient {
     }
 
     this.lastRequestTime = Date.now();
-    return fetch(input.toString(), init);
+    return fetch(input.toString(), {
+      ...init,
+      signal: init?.signal ?? AbortSignal.timeout(120_000),
+    });
   }
 
   async checkHealth(): Promise<boolean> {

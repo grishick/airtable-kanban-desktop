@@ -28,9 +28,16 @@ export class SyncEngine {
   private harvestedCollaborators = new Map<string, AirtableCollaborator>();
   private powerSaveId: number | null = null;
   private intervalMs = DEFAULT_SYNC_INTERVAL_MS;
+  /** Ensures only one sync cycle runs at a time (interval + manual triggers). */
+  private syncTail: Promise<void> = Promise.resolve();
 
   constructor(private win: BrowserWindow) {
     this.reinit();
+  }
+
+  /** Point status/task broadcasts at the current renderer window (e.g. after macOS closes and reopens the window). */
+  setBroadcastWindow(win: BrowserWindow): void {
+    this.win = win;
   }
 
   /** Re-read active account and recreate the Airtable client. */
@@ -55,7 +62,12 @@ export class SyncEngine {
 
   /** Begin periodic sync loop. */
   start(): void {
-    this.powerSaveId = powerSaveBlocker.start('prevent-app-suspension');
+    if (this.startupTimer !== null || this.timer !== null) {
+      return;
+    }
+    if (this.powerSaveId === null) {
+      this.powerSaveId = powerSaveBlocker.start('prevent-app-suspension');
+    }
     this.startupTimer = setTimeout(() => {
       this.startupTimer = null;
       void this.sync();
@@ -124,8 +136,16 @@ export class SyncEngine {
     await this.sync();
   }
 
-  /** Public entry point: run one full sync cycle. */
-  async sync(): Promise<void> {
+  /** Public entry point: run one full sync cycle (serialized — overlapping calls queue). */
+  sync(): Promise<void> {
+    const run = this.syncTail.then(() => this.performSync());
+    this.syncTail = run.catch(() => {
+      /* Errors are stored in sync state; keep the queue unbroken. */
+    });
+    return run;
+  }
+
+  private async performSync(): Promise<void> {
     // Refresh OAuth token if needed before attempting sync
     const activeAccount = getActiveAccount();
     if (activeAccount?.authType === 'oauth') {

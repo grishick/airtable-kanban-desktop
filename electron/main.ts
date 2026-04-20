@@ -455,7 +455,13 @@ app.whenReady().then(() => {
   syncEngine.start();
 
   app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow();
+    if (BrowserWindow.getAllWindows().length === 0) {
+      const win = createWindow();
+      // window-all-closed calls syncEngine.stop(); broadcasts still targeted at the
+      // destroyed window unless we retarget and restart the interval.
+      syncEngine?.setBroadcastWindow(win);
+      syncEngine?.start();
+    }
   });
 });
 
